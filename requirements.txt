@@ -1,0 +1,7 @@
+streamlit
+pandas
+qrcode[pil]
+pillow
+opencv-python-headless
+pyzbar
+reportlab
