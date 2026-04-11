@@ -5,7 +5,6 @@ import qrcode
 from io import BytesIO
 import sqlite3
 from PIL import Image
-import qrcode
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
@@ -117,8 +116,8 @@ elif menu == "2. Mis Cursos (Agregar / Eliminar)":
 
     st.subheader("Agregar nuevo curso")
     col1, col2 = st.columns(2)
-    with col1: nuevo_g = st.text_input("Grado", key="n_grado")
-    with col2: nuevo_m = st.text_input("Materia", key="n_materia")
+    with col1: nuevo_g = st.text_input("Grado (ej: 10A)", key="n_grado")
+    with col2: nuevo_m = st.text_input("Materia (ej: Matemáticas)", key="n_materia")
     if st.button("Agregar curso", type="primary"):
         if nuevo_g and nuevo_m:
             try:
@@ -130,92 +129,105 @@ elif menu == "2. Mis Cursos (Agregar / Eliminar)":
             except:
                 st.warning("Este curso ya existe")
 
-# 3. GESTIONAR ESTUDIANTES + PDF
+# 3. GESTIONAR ESTUDIANTES + PDF (Optimizado para celular)
 elif menu == "3. Gestionar Estudiantes y Generar PDF":
     st.header("👥 Gestionar Estudiantes y Generar PDF")
     df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos", conn)
     if df_cursos.empty:
-        st.warning("Agrega cursos primero")
+        st.warning("Agrega cursos primero en la opción 2")
     else:
         lista = [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()]
         seleccion = st.selectbox("Selecciona curso", lista)
         grado, materia = [x.strip() for x in seleccion.split(" - ")]
 
-        archivo = st.file_uploader("Sube lista de estudiantes (Excel o CSV)", type=["xlsx", "csv"])
+        st.info("📱 Puedes subir el archivo desde tu celular")
+
+        archivo = st.file_uploader(
+            "Sube lista de estudiantes (Excel o CSV)", 
+            type=["xlsx", "xls", "csv"],
+            help="Formatos aceptados: .xlsx, .xls, .csv"
+        )
+
         if archivo:
-            if archivo.name.endswith(".csv"):
-                df = pd.read_csv(archivo)
-            else:
-                df = pd.read_excel(archivo)
+            try:
+                if archivo.name.endswith(".csv"):
+                    df = pd.read_csv(archivo)
+                else:
+                    df = pd.read_excel(archivo)
 
-            df.columns = [c.strip().lower() for c in df.columns]
-            if "id" in df.columns:
-                df = df.rename(columns={"id": "estudiante_id"})
+                df.columns = [c.strip().lower() for c in df.columns]
+                if "id" in df.columns:
+                    df = df.rename(columns={"id": "estudiante_id"})
 
-            if "estudiante_id" not in df.columns or "nombre" not in df.columns:
-                st.error("El archivo debe tener columnas: **estudiante_id** y **nombre**")
-            else:
-                df["grado"] = grado
-                df["materia"] = materia
-                df = df[["grado", "materia", "estudiante_id", "nombre"]].drop_duplicates()
+                if "estudiante_id" not in df.columns or "nombre" not in df.columns:
+                    st.error("❌ El archivo debe tener las columnas: **estudiante_id** y **nombre**")
+                else:
+                    df["grado"] = grado
+                    df["materia"] = materia
+                    df = df[["grado", "materia", "estudiante_id", "nombre"]].drop_duplicates()
 
-                agregados = 0
-                for _, row in df.iterrows():
-                    try:
-                        conn.execute("INSERT INTO estudiantes VALUES (?,?,?,?)", 
-                                    (row["grado"], row["materia"], row["estudiante_id"], row["nombre"]))
-                        conn.commit()
-                        agregados += 1
-                    except:
-                        pass
-                st.success(f"✅ Se agregaron {agregados} estudiantes.")
+                    agregados = 0
+                    for _, row in df.iterrows():
+                        try:
+                            conn.execute("INSERT INTO estudiantes VALUES (?,?,?,?)", 
+                                        (row["grado"], row["materia"], row["estudiante_id"], row["nombre"]))
+                            conn.commit()
+                            agregados += 1
+                        except:
+                            pass
+                    
+                    st.success(f"✅ Se cargaron {len(df)} estudiantes correctamente ({agregados} nuevos)")
 
-                if st.button("📄 Generar PDF con QR (4x4 cm)", type="primary"):
-                    with st.spinner("Generando PDF..."):
-                        pdf_buffer = BytesIO()
-                        c = canvas.Canvas(pdf_buffer, pagesize=A4)
-                        width, height = A4
-                        qr_size = 113.3858
-                        margin_x = 45
-                        margin_y = 70
-                        spacing_x = 25
-                        spacing_y = 65
-                        cols = 3
+                    # Botón para generar PDF
+                    if st.button("📄 Generar PDF con QR (4x4 cm)", type="primary"):
+                        with st.spinner("Generando PDF..."):
+                            pdf_buffer = BytesIO()
+                            c = canvas.Canvas(pdf_buffer, pagesize=A4)
+                            width, height = A4
+                            qr_size = 113.3858
+                            margin_x = 45
+                            margin_y = 70
+                            spacing_x = 25
+                            spacing_y = 65
+                            cols = 3
 
-                        for i, (_, row) in enumerate(df.iterrows()):
-                            if i % (cols * 4) == 0 and i != 0:
-                                c.showPage()
+                            for i, (_, row) in enumerate(df.iterrows()):
+                                if i % (cols * 4) == 0 and i != 0:
+                                    c.showPage()
 
-                            col = i % cols
-                            row_num = (i // cols) % 4
-                            x = margin_x + col * (qr_size + spacing_x)
-                            y = height - margin_y - row_num * (qr_size + spacing_y)
+                                col = i % cols
+                                row_num = (i // cols) % 4
+                                x = margin_x + col * (qr_size + spacing_x)
+                                y = height - margin_y - row_num * (qr_size + spacing_y)
 
-                            qr_img = generar_qr(row["estudiante_id"])
-                            qr_pil = Image.open(qr_img)
-                            qr_path = BytesIO()
-                            qr_pil.save(qr_path, format="PNG")
-                            qr_path.seek(0)
-                            c.drawImage(ImageReader(qr_path), x, y - qr_size, width=qr_size, height=qr_size)
+                                qr_img = generar_qr(row["estudiante_id"])
+                                qr_pil = Image.open(qr_img)
+                                qr_path = BytesIO()
+                                qr_pil.save(qr_path, format="PNG")
+                                qr_path.seek(0)
+                                c.drawImage(ImageReader(qr_path), x, y - qr_size, width=qr_size, height=qr_size)
 
-                            nombre_corto = abreviar_nombre(row["nombre"])
+                                nombre_corto = abreviar_nombre(row["nombre"])
 
-                            c.setFont("Helvetica-Bold", 9)
-                            c.drawCentredString(x + qr_size/2, y - qr_size - 15, nombre_corto)
-                            c.setFont("Helvetica", 8)
-                            c.drawCentredString(x + qr_size/2, y - qr_size - 27, f"{grado} - {materia}")
+                                c.setFont("Helvetica-Bold", 9)
+                                c.drawCentredString(x + qr_size/2, y - qr_size - 15, nombre_corto)
+                                c.setFont("Helvetica", 8)
+                                c.drawCentredString(x + qr_size/2, y - qr_size - 27, f"{grado} - {materia}")
 
-                        c.save()
-                        pdf_buffer.seek(0)
+                            c.save()
+                            pdf_buffer.seek(0)
 
-                    st.download_button(
-                        label="⬇️ Descargar PDF listo para imprimir",
-                        data=pdf_buffer,
-                        file_name=f"QR_{grado}_{materia}.pdf",
-                        mime="application/pdf"
-                    )
+                        st.download_button(
+                            label="⬇️ Descargar PDF listo para imprimir",
+                            data=pdf_buffer,
+                            file_name=f"QR_{grado}_{materia}.pdf",
+                            mime="application/pdf"
+                        )
+            except Exception as e:
+                st.error(f"Error al leer el archivo: {str(e)}")
+                st.info("Asegúrate de que el archivo tenga las columnas 'estudiante_id' y 'nombre'")
 
-# 4. ESCANEAR (Versión simplificada sin pyzbar)
+# 4. ESCANEAR
 elif menu == "4. Escanear Asistencia con Cámara":
     st.header("📸 Escanear QR del estudiante")
     df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos", conn)
@@ -229,27 +241,34 @@ elif menu == "4. Escanear Asistencia con Cámara":
         picture = st.camera_input("Apunta al QR y toma la foto", key="cam_key")
 
         if picture is not None:
-            st.info("📸 Foto tomada. Procesando QR...")
-            # Nota: En esta versión simplificada, el escaneo con pyzbar está desactivado.
-            # Te recomiendo usar la cámara del celular para escanear y luego ingresar manualmente el ID por ahora.
-            st.warning("⚠️ Función de escaneo automático temporalmente desactivada por problemas de compatibilidad en la nube.\n\nPor favor, usa la cámara de tu celular para escanear el QR y luego ingresa manualmente el ID del estudiante.")
-
-            est_id_manual = st.text_input("Ingresa manualmente el ID del estudiante (del QR)")
-            if est_id_manual and st.button("Registrar Asistencia"):
+            image = Image.open(picture)
+            decoded = decode(np.array(image))
+            if decoded:
+                est_id = decoded[0].data.decode("utf-8").strip()
                 info = pd.read_sql("SELECT nombre FROM estudiantes WHERE estudiante_id=? AND grado=? AND materia=?", 
-                                   conn, params=(est_id_manual, grado, materia))
+                                   conn, params=(est_id, grado, materia))
                 if info.empty:
                     st.error("🚫 El estudiante no pertenece al grado")
                 else:
                     nombre = info.iloc[0]["nombre"]
                     fecha = datetime.now().strftime("%Y-%m-%d")
                     hora = datetime.now().strftime("%H:%M:%S")
-                    try:
-                        conn.execute("INSERT INTO asistencias VALUES (?,?,?,?,?)", (grado, materia, est_id_manual, fecha, hora))
-                        conn.commit()
-                        st.success(f"✅ Asistencia registrada para {nombre}")
-                    except:
-                        st.warning("Este estudiante ya tiene asistencia hoy")
+                    key = f"{grado}_{materia}_{est_id}_{fecha}"
+                    if key not in st.session_state:
+                        try:
+                            conn.execute("INSERT INTO asistencias VALUES (?,?,?,?,?)", (grado, materia, est_id, fecha, hora))
+                            conn.commit()
+                            st.session_state[key] = True
+                            st.balloons()
+                            st.success(f"✅ Asistencia registrada para {nombre}")
+                        except:
+                            st.warning("Este estudiante ya tiene asistencia hoy")
+            else:
+                st.error("No se pudo leer el código QR. Intenta con mejor luz o más cerca.")
+
+            if st.button("✅ Listo - Escanear siguiente"):
+                st.session_state.cam_key = None
+                st.rerun()
 
 # 5. REPORTE
 elif menu == "5. Reporte y Descargar Excel":
