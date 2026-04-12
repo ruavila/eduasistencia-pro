@@ -36,6 +36,10 @@ def generar_qr(texto):
     buffer.seek(0)
     return buffer
 
+def obtener_nombre_docente(profesor):
+    res = conn.execute("SELECT nombre_completo FROM profesores WHERE username=?", (profesor,)).fetchone()
+    return res[0] if res else ""
+
 def abreviar_nombre(nombre):
     partes = nombre.strip().split()
     if len(partes) <= 2:
@@ -86,6 +90,9 @@ if st.session_state.profesor_actual is None:
                     st.rerun()
                 else:
                     st.error("Usuario o contraseña incorrectos")
+            else:
+                st.warning("Ingresa usuario y contraseña")
+
     with tab2:
         nuevo_user = st.text_input("Usuario", key="reg_user")
         nuevo_nombre = st.text_input("Nombre completo", key="reg_nombre")
@@ -99,8 +106,11 @@ if st.session_state.profesor_actual is None:
                     st.success("Registro exitoso. Ahora inicia sesión.")
                 except:
                     st.error("Ese usuario ya existe")
+            else:
+                st.error("Completa todos los campos")
     st.stop()
 
+# ====================== USUARIO LOGUEADO ======================
 profesor = st.session_state.profesor_actual
 nombre_docente = st.session_state.nombre_docente
 
@@ -112,29 +122,18 @@ if st.sidebar.button("Cerrar Sesión"):
     st.rerun()
 
 menu = st.sidebar.selectbox("Menú principal:", [
-    "1. Nombre del Docente",
-    "2. Mis Cursos (Agregar / Eliminar)",
-    "3. Gestionar Estudiantes y Generar PDF",
-    "4. Escanear Asistencia con Cámara",
-    "5. Reporte y Descargar Excel",
-    "6. Reiniciar mis datos"
+    "1. Mis Cursos (Agregar / Eliminar)",
+    "2. Gestionar Estudiantes y Generar PDF",
+    "3. Escanear Asistencia con Cámara",
+    "4. Reporte y Descargar Excel",
+    "5. Reiniciar mis datos"
 ])
 
-# 1. NOMBRE DEL DOCENTE
-if menu == "1. Nombre del Docente":
-    st.header("👨‍🏫 Nombre del Docente")
-    nuevo = st.text_input("Tu nombre completo", value=obtener_nombre_docente())
-    if st.button("Guardar nombre", type="primary"):
-        if nuevo.strip():
-            guardar_nombre_docente(nuevo.strip())
-            st.success("✅ Nombre guardado correctamente")
-            st.rerun()
-
-# 2. MIS CURSOS - CORREGIDO (Eliminación robusta)
-elif menu == "2. Mis Cursos (Agregar / Eliminar)":
+# 1. MIS CURSOS
+if menu == "1. Mis Cursos (Agregar / Eliminar)":
     st.header("📚 Mis Cursos")
     df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=? ORDER BY grado, materia", conn, params=(profesor,))
-
+    
     if not df_cursos.empty:
         st.subheader("Cursos registrados")
         st.dataframe(df_cursos, use_container_width=True)
@@ -142,7 +141,7 @@ elif menu == "2. Mis Cursos (Agregar / Eliminar)":
         st.subheader("🗑️ Eliminar Curso")
         curso_elim = st.selectbox("Selecciona el curso a eliminar", 
                                   [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()], 
-                                  key="curso_eliminar_key")
+                                  key="curso_eliminar")
         
         if st.button("🗑️ Eliminar curso seleccionado", type="secondary"):
             if st.checkbox("Confirmo que deseo eliminar este curso y todos sus estudiantes"):
@@ -152,14 +151,14 @@ elif menu == "2. Mis Cursos (Agregar / Eliminar)":
                 conn.execute("DELETE FROM asistencias WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
                 conn.commit()
                 st.success(f"✅ Operación exitosa. Curso **{g} - {m}** eliminado correctamente")
-                st.rerun()   # Fuerza actualización
+                st.rerun()
     else:
         st.info("Aún no tienes cursos registrados.")
 
     st.subheader("Agregar nuevo curso")
     col1, col2 = st.columns(2)
-    with col1: nuevo_g = st.text_input("Grado", key="n_grado")
-    with col2: nuevo_m = st.text_input("Materia", key="n_materia")
+    with col1: nuevo_g = st.text_input("Grado (ej: 10A)", key="n_grado")
+    with col2: nuevo_m = st.text_input("Materia (ej: Matemáticas)", key="n_materia")
     if st.button("Agregar curso", type="primary"):
         if nuevo_g and nuevo_m:
             try:
@@ -171,12 +170,12 @@ elif menu == "2. Mis Cursos (Agregar / Eliminar)":
             except:
                 st.warning("Este curso ya existe para ti")
 
-# 3. GESTIONAR ESTUDIANTES Y GENERAR PDF - Optimizado para Celular
-elif menu == "3. Gestionar Estudiantes y Generar PDF":
+# 2. GESTIONAR ESTUDIANTES Y GENERAR PDF - Optimizado para Celular
+elif menu == "2. Gestionar Estudiantes y Generar PDF":
     st.header("👥 Gestionar Estudiantes y Generar PDF")
     df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
     if df_cursos.empty:
-        st.warning("Agrega cursos primero")
+        st.warning("Agrega cursos primero en la opción 1")
     else:
         lista = [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()]
         seleccion = st.selectbox("Selecciona curso", lista)
@@ -185,18 +184,14 @@ elif menu == "3. Gestionar Estudiantes y Generar PDF":
         st.subheader("📁 Subir lista de estudiantes")
         st.markdown("""
         <div style='background:#FFF3CD; padding:15px; border-radius:10px; border:2px solid #FFC107;'>
-        📱 <strong>Desde celular (Samsung/Chrome):</strong><br>
+        📱 <strong>Desde celular:</strong><br>
+        • Usa Chrome o Google<br>
         • Toca "Examinar" y selecciona el archivo rápidamente<br>
-        • Usa archivos guardados en Descargas o Documentos<br>
-        • Formatos aceptados: .xlsx, .xls, .csv
+        • Formatos: .xlsx, .xls, .csv
         </div>
         """, unsafe_allow_html=True)
 
-        archivo = st.file_uploader(
-            "Selecciona el archivo", 
-            type=["xlsx", "xls", "csv"],
-            key="file_uploader_key"
-        )
+        archivo = st.file_uploader("Selecciona el archivo", type=["xlsx", "xls", "csv"], key="file_uploader_key")
 
         if archivo is not None:
             try:
@@ -210,7 +205,7 @@ elif menu == "3. Gestionar Estudiantes y Generar PDF":
                     df = df.rename(columns={"id": "estudiante_id"})
 
                 if "estudiante_id" not in df.columns or "nombre" not in df.columns:
-                    st.error("El archivo debe tener las columnas: estudiante_id y nombre")
+                    st.error("El archivo debe tener columnas: estudiante_id y nombre")
                 else:
                     df["profesor"] = profesor
                     df["grado"] = grado
@@ -231,16 +226,14 @@ elif menu == "3. Gestionar Estudiantes y Generar PDF":
                         st.rerun()
             except Exception as e:
                 st.error(f"Error al leer el archivo: {str(e)}")
-                st.info("Intenta guardar el archivo como .xlsx desde Excel")
 
-        # Generar PDF
         if st.button("📄 Generar PDF con QR (4x4 cm)", type="primary"):
             df_para_pdf = pd.read_sql(
                 "SELECT estudiante_id, nombre FROM estudiantes WHERE profesor=? AND grado=? AND materia=? ORDER BY nombre",
                 conn, params=(profesor, grado, materia)
             )
             if df_para_pdf.empty:
-                st.warning("No hay estudiantes para generar el PDF")
+                st.warning("No hay estudiantes")
             else:
                 with st.spinner("Generando PDF..."):
                     pdf_buffer = BytesIO()
