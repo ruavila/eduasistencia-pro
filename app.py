@@ -8,6 +8,7 @@ from PIL import Image
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
+import hashlib
 
 # ====================== CONFIGURACIÓN ======================
 APP_NAME = "EduAsistencia Pro"
@@ -20,9 +21,13 @@ ESCUDO_PATH = "escudo.png"
 conn = sqlite3.connect("asistencia.db", check_same_thread=False)
 
 conn.execute("CREATE TABLE IF NOT EXISTS config (clave TEXT PRIMARY KEY, valor TEXT)")
-conn.execute("CREATE TABLE IF NOT EXISTS docentes_cursos (grado TEXT, materia TEXT, PRIMARY KEY (grado, materia))")
-conn.execute("CREATE TABLE IF NOT EXISTS estudiantes (grado TEXT, materia TEXT, estudiante_id TEXT, nombre TEXT, PRIMARY KEY (grado, materia, estudiante_id))")
-conn.execute("CREATE TABLE IF NOT EXISTS asistencias (grado TEXT, materia TEXT, estudiante_id TEXT, fecha TEXT, hora_registro TEXT, PRIMARY KEY (grado, materia, estudiante_id, fecha))")
+conn.execute("CREATE TABLE IF NOT EXISTS profesores (username TEXT PRIMARY KEY, password_hash TEXT, nombre_completo TEXT)")
+conn.execute("CREATE TABLE IF NOT EXISTS docentes_cursos (profesor TEXT, grado TEXT, materia TEXT, PRIMARY KEY (profesor, grado, materia))")
+conn.execute("CREATE TABLE IF NOT EXISTS estudiantes (profesor TEXT, grado TEXT, materia TEXT, estudiante_id TEXT, nombre TEXT, PRIMARY KEY (profesor, grado, materia, estudiante_id))")
+conn.execute("CREATE TABLE IF NOT EXISTS asistencias (profesor TEXT, grado TEXT, materia TEXT, estudiante_id TEXT, fecha TEXT, hora_registro TEXT, PRIMARY KEY (profesor, grado, materia, estudiante_id, fecha))")
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
 def generar_qr(texto):
     qr = qrcode.make(texto)
@@ -30,14 +35,6 @@ def generar_qr(texto):
     qr.save(buffer, format="PNG")
     buffer.seek(0)
     return buffer
-
-def obtener_nombre_docente():
-    res = conn.execute("SELECT valor FROM config WHERE clave='nombre_docente'").fetchone()
-    return res[0] if res else ""
-
-def guardar_nombre_docente(nombre):
-    conn.execute("INSERT OR REPLACE INTO config (clave, valor) VALUES ('nombre_docente', ?)", (nombre,))
-    conn.commit()
 
 def abreviar_nombre(nombre):
     partes = nombre.strip().split()
@@ -66,32 +63,76 @@ with col_titulo:
 
 st.markdown("<hr style='margin: 25px 0;'>", unsafe_allow_html=True)
 
-if obtener_nombre_docente():
-    st.markdown(f"**Docente:** {obtener_nombre_docente()}")
+# ====================== LOGIN ======================
+if 'profesor_actual' not in st.session_state:
+    st.session_state.profesor_actual = None
+    st.session_state.nombre_docente = None
 
+if st.session_state.profesor_actual is None:
+    st.header("🔑 Acceso al Sistema")
+    tab1, tab2 = st.tabs(["Iniciar Sesión", "Registrarse"])
+
+    with tab1:
+        username = st.text_input("Usuario", key="login_user")
+        password = st.text_input("Contraseña", type="password", key="login_pass")
+        if st.button("Ingresar", type="primary"):
+            if username and password:
+                password_hash = hash_password(password)
+                res = conn.execute("SELECT nombre_completo FROM profesores WHERE username=? AND password_hash=?", 
+                                  (username, password_hash)).fetchone()
+                if res:
+                    st.session_state.profesor_actual = username
+                    st.session_state.nombre_docente = res[0]
+                    st.rerun()
+                else:
+                    st.error("Usuario o contraseña incorrectos")
+            else:
+                st.warning("Ingresa usuario y contraseña")
+
+    with tab2:
+        nuevo_user = st.text_input("Usuario (ej: juan.perez)", key="reg_user")
+        nuevo_nombre = st.text_input("Nombre completo", key="reg_nombre")
+        nueva_pass = st.text_input("Contraseña", type="password", key="reg_pass")
+        if st.button("Registrarse", type="primary"):
+            if nuevo_user and nuevo_nombre and nueva_pass:
+                try:
+                    conn.execute("INSERT INTO profesores VALUES (?, ?, ?)", 
+                                (nuevo_user.strip(), hash_password(nueva_pass), nuevo_nombre.strip()))
+                    conn.commit()
+                    st.success("✅ Registro exitoso. Ahora inicia sesión.")
+                except:
+                    st.error("Ese usuario ya existe")
+            else:
+                st.error("Completa todos los campos")
+    st.stop()
+
+# ====================== USUARIO LOGUEADO ======================
+profesor = st.session_state.profesor_actual
+nombre_docente = st.session_state.nombre_docente
+
+st.sidebar.success(f"✅ Conectado como: {nombre_docente}")
+
+if st.sidebar.button("Cerrar Sesión"):
+    st.session_state.profesor_actual = None
+    st.session_state.nombre_docente = None
+    st.rerun()
+
+# ====================== MENÚ ======================
 menu = st.sidebar.selectbox("Menú principal:", [
-    "1. Nombre del Docente",
-    "2. Mis Cursos (Agregar / Eliminar)",
-    "3. Gestionar Estudiantes y Generar PDF",
-    "4. Escanear Asistencia con Cámara",
-    "5. Reporte y Descargar Excel",
-    "6. Reiniciar Aplicación (Nuevo año lectivo)"
+    "1. Mis Cursos (Agregar / Eliminar)",
+    "2. Gestionar Estudiantes y Generar PDF",
+    "3. Escanear Asistencia con Cámara",
+    "4. Reporte y Descargar Excel",
+    "5. Reiniciar mis datos"
 ])
 
-# 1. NOMBRE DEL DOCENTE
-if menu == "1. Nombre del Docente":
-    st.header("👨‍🏫 Nombre del Docente")
-    nuevo = st.text_input("Tu nombre completo", value=obtener_nombre_docente())
-    if st.button("Guardar nombre", type="primary"):
-        if nuevo.strip():
-            guardar_nombre_docente(nuevo.strip())
-            st.success("✅ Nombre guardado correctamente")
-            st.rerun()
-
-# 2. MIS CURSOS
-elif menu == "2. Mis Cursos (Agregar / Eliminar)":
+# 1. MIS CURSOS
+if menu == "1. Mis Cursos (Agregar / Eliminar)":
     st.header("📚 Mis Cursos")
-    df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos ORDER BY grado, materia", conn)
+    df_cursos = pd.read_sql(
+        "SELECT grado, materia FROM docentes_cursos WHERE profesor=? ORDER BY grado, materia", 
+        conn, params=(profesor,)
+    )
     
     if not df_cursos.empty:
         st.subheader("Cursos registrados")
@@ -99,15 +140,14 @@ elif menu == "2. Mis Cursos (Agregar / Eliminar)":
 
         st.subheader("🗑️ Eliminar Curso")
         curso_elim = st.selectbox("Selecciona el curso a eliminar", 
-                                  [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()], 
-                                  key="curso_eliminar")
+                                  [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()])
         
         if st.button("🗑️ Eliminar curso seleccionado", type="secondary"):
             if st.checkbox("Confirmo que deseo eliminar este curso y todos sus estudiantes"):
                 g, m = [x.strip() for x in curso_elim.split(" - ")]
-                conn.execute("DELETE FROM docentes_cursos WHERE grado=? AND materia=?", (g, m))
-                conn.execute("DELETE FROM estudiantes WHERE grado=? AND materia=?", (g, m))
-                conn.execute("DELETE FROM asistencias WHERE grado=? AND materia=?", (g, m))
+                conn.execute("DELETE FROM docentes_cursos WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
+                conn.execute("DELETE FROM estudiantes WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
+                conn.execute("DELETE FROM asistencias WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
                 conn.commit()
                 st.success(f"✅ Operación exitosa. Curso **{g} - {m}** eliminado correctamente")
                 st.rerun()
@@ -116,25 +156,25 @@ elif menu == "2. Mis Cursos (Agregar / Eliminar)":
 
     st.subheader("Agregar nuevo curso")
     col1, col2 = st.columns(2)
-    with col1: nuevo_g = st.text_input("Grado (ej: 10A)", key="n_grado")
-    with col2: nuevo_m = st.text_input("Materia (ej: Matemáticas)", key="n_materia")
+    with col1: nuevo_g = st.text_input("Grado (ej: 10A)")
+    with col2: nuevo_m = st.text_input("Materia (ej: Matemáticas)")
     if st.button("Agregar curso", type="primary"):
         if nuevo_g and nuevo_m:
             try:
-                conn.execute("INSERT INTO docentes_cursos VALUES (?, ?)", 
-                            (nuevo_g.strip().upper(), nuevo_m.strip()))
+                conn.execute("INSERT INTO docentes_cursos VALUES (?, ?, ?)", 
+                            (profesor, nuevo_g.strip().upper(), nuevo_m.strip()))
                 conn.commit()
                 st.success("✅ Curso agregado correctamente")
                 st.rerun()
             except:
-                st.warning("Este curso ya existe")
+                st.warning("Este curso ya existe para ti")
 
-# 3. GESTIONAR ESTUDIANTES Y GENERAR PDF
-elif menu == "3. Gestionar Estudiantes y Generar PDF":
+# 2. GESTIONAR ESTUDIANTES Y GENERAR PDF
+elif menu == "2. Gestionar Estudiantes y Generar PDF":
     st.header("👥 Gestionar Estudiantes y Generar PDF")
-    df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos", conn)
+    df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
     if df_cursos.empty:
-        st.warning("Agrega cursos primero en la opción 2")
+        st.warning("Agrega cursos primero en la opción 1")
     else:
         lista = [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()]
         seleccion = st.selectbox("Selecciona curso", lista)
@@ -155,28 +195,28 @@ elif menu == "3. Gestionar Estudiantes y Generar PDF":
                 if "estudiante_id" not in df.columns or "nombre" not in df.columns:
                     st.error("El archivo debe tener columnas: **estudiante_id** y **nombre**")
                 else:
+                    df["profesor"] = profesor
                     df["grado"] = grado
                     df["materia"] = materia
-                    df = df[["grado", "materia", "estudiante_id", "nombre"]].drop_duplicates()
+                    df = df[["profesor", "grado", "materia", "estudiante_id", "nombre"]].drop_duplicates()
 
                     agregados = 0
                     for _, row in df.iterrows():
                         try:
-                            conn.execute("INSERT INTO estudiantes VALUES (?,?,?,?)", 
-                                        (row["grado"], row["materia"], row["estudiante_id"], row["nombre"]))
+                            conn.execute("INSERT INTO estudiantes VALUES (?,?,?,?,?)", 
+                                        (row["profesor"], row["grado"], row["materia"], row["estudiante_id"], row["nombre"]))
                             conn.commit()
                             agregados += 1
                         except:
                             pass
                     st.success(f"✅ Se agregaron {agregados} estudiantes.")
 
-                    # Botón para generar PDF
                     if st.button("📄 Generar PDF con QR (4x4 cm)", type="primary"):
                         with st.spinner("Generando PDF..."):
                             pdf_buffer = BytesIO()
                             c = canvas.Canvas(pdf_buffer, pagesize=A4)
                             width, height = A4
-                            qr_size = 113.3858   # 4 cm
+                            qr_size = 113.3858
                             margin_x = 45
                             margin_y = 70
                             spacing_x = 25
@@ -192,7 +232,6 @@ elif menu == "3. Gestionar Estudiantes y Generar PDF":
                                 x = margin_x + col * (qr_size + spacing_x)
                                 y = height - margin_y - row_num * (qr_size + spacing_y)
 
-                                # QR
                                 qr_img = generar_qr(row["estudiante_id"])
                                 qr_pil = Image.open(qr_img)
                                 qr_path = BytesIO()
@@ -200,8 +239,8 @@ elif menu == "3. Gestionar Estudiantes y Generar PDF":
                                 qr_path.seek(0)
                                 c.drawImage(ImageReader(qr_path), x, y - qr_size, width=qr_size, height=qr_size)
 
-                                # Nombre debajo
                                 nombre_corto = abreviar_nombre(row["nombre"])
+
                                 c.setFont("Helvetica-Bold", 9)
                                 c.drawCentredString(x + qr_size/2, y - qr_size - 15, nombre_corto)
                                 c.setFont("Helvetica", 8)
@@ -219,10 +258,10 @@ elif menu == "3. Gestionar Estudiantes y Generar PDF":
             except Exception as e:
                 st.error(f"Error al leer el archivo: {str(e)}")
 
-# 4. ESCANEAR
-elif menu == "4. Escanear Asistencia con Cámara":
+# 3. ESCANEAR
+elif menu == "3. Escanear Asistencia con Cámara":
     st.header("📸 Escanear QR del estudiante")
-    df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos", conn)
+    df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
     if df_cursos.empty:
         st.warning("Agrega cursos primero")
     else:
@@ -230,44 +269,44 @@ elif menu == "4. Escanear Asistencia con Cámara":
         sel = st.selectbox("Selecciona curso", lista)
         grado, materia = [x.strip() for x in sel.split(" - ")]
 
-        st.info("Apunta la cámara al QR del estudiante y toma la foto")
-
-        picture = st.camera_input("Captura el QR", key="cam_key")
+        picture = st.camera_input("Apunta al QR y toma la foto", key="cam_key")
 
         if picture is not None:
             image = Image.open(picture)
             decoded = decode(np.array(image))
             if decoded:
                 est_id = decoded[0].data.decode("utf-8").strip()
-                info = pd.read_sql("SELECT nombre FROM estudiantes WHERE estudiante_id=? AND grado=? AND materia=?", 
-                                   conn, params=(est_id, grado, materia))
+                info = pd.read_sql(
+                    "SELECT nombre FROM estudiantes WHERE profesor=? AND estudiante_id=? AND grado=? AND materia=?", 
+                    conn, params=(profesor, est_id, grado, materia))
                 if info.empty:
                     st.error("🚫 El estudiante no pertenece al grado")
                 else:
                     nombre = info.iloc[0]["nombre"]
                     fecha = datetime.now().strftime("%Y-%m-%d")
                     hora = datetime.now().strftime("%H:%M:%S")
-                    key = f"{grado}_{materia}_{est_id}_{fecha}"
+                    key = f"{profesor}_{grado}_{materia}_{est_id}_{fecha}"
                     if key not in st.session_state:
                         try:
-                            conn.execute("INSERT INTO asistencias VALUES (?,?,?,?,?)", (grado, materia, est_id, fecha, hora))
+                            conn.execute("INSERT INTO asistencias VALUES (?,?,?,?,?,?)", 
+                                        (profesor, grado, materia, est_id, fecha, hora))
                             conn.commit()
                             st.session_state[key] = True
                             st.balloons()
-                            st.success(f"✅ Asistencia registrada para {nombre} a las {hora}")
+                            st.success(f"✅ Asistencia registrada para {nombre}")
                         except:
                             st.warning("Este estudiante ya tiene asistencia hoy")
             else:
-                st.error("No se pudo leer el código QR. Intenta con mejor luz o más cerca.")
+                st.error("No se pudo leer el código QR")
 
             if st.button("✅ Listo - Escanear siguiente"):
                 st.session_state.cam_key = None
                 st.rerun()
 
-# 5. REPORTE
-elif menu == "5. Reporte y Descargar Excel":
+# 4. REPORTE
+elif menu == "4. Reporte y Descargar Excel":
     st.header("📊 Reporte de Asistencia")
-    df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos", conn)
+    df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
     if df_cursos.empty:
         st.warning("No hay cursos")
     else:
@@ -279,8 +318,8 @@ elif menu == "5. Reporte y Descargar Excel":
             SELECT e.nombre, a.fecha 
             FROM asistencias a
             JOIN estudiantes e ON a.estudiante_id = e.estudiante_id
-            WHERE a.grado = ? AND a.materia = ?
-        """, conn, params=(grado, materia))
+            WHERE a.profesor=? AND a.grado = ? AND a.materia = ?
+        """, conn, params=(profesor, grado, materia))
 
         if data.empty:
             st.info("Todavía no hay asistencias")
@@ -300,29 +339,22 @@ elif menu == "5. Reporte y Descargar Excel":
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 pd.DataFrame([[f"ASISTENCIA - {materia} - GRADO {grado}"]]).to_excel(writer, startrow=0, header=False, index=False)
-                pd.DataFrame([[f"Colegio: {COLEGIO}"]]).to_excel(writer, startrow=1, header=False, index=False)
-                pd.DataFrame([[f"Docente: {obtener_nombre_docente() or 'No registrado'}"]]).to_excel(writer, startrow=2, header=False, index=False)
-                tabla.to_excel(writer, startrow=4, index=False)
+                pd.DataFrame([[f"Docente: {nombre_docente}"]]).to_excel(writer, startrow=1, header=False, index=False)
+                tabla.to_excel(writer, startrow=3, index=False)
             output.seek(0)
             st.download_button("📥 Descargar Excel", output, f"Asistencia_{grado}_{materia}.xlsx")
 
-# 6. REINICIAR
-elif menu == "6. Reiniciar Aplicación (Nuevo año lectivo)":
-    st.header("⚠️ Reiniciar Aplicación")
-    st.warning("""
-        **¡Atención importante!**  
-        Esta acción borrará **todos** los cursos, estudiantes y registros de asistencia.  
-        Solo se mantendrá el nombre del docente.  
-        Esta operación **no se puede deshacer**.
-    """)
-    
-    if st.checkbox("Entiendo las consecuencias y deseo reiniciar la aplicación"):
-        if st.button("🔄 Confirmar Reinicio Completo", type="secondary"):
-            conn.execute("DELETE FROM docentes_cursos")
-            conn.execute("DELETE FROM estudiantes")
-            conn.execute("DELETE FROM asistencias")
+# 5. REINICIAR MIS DATOS
+elif menu == "5. Reiniciar mis datos":
+    st.header("⚠️ Reiniciar mis datos")
+    st.warning("Esta acción borrará todos tus cursos, estudiantes y asistencias. Los datos de otros profesores no se verán afectados.")
+    if st.checkbox("Entiendo y deseo reiniciar mis datos"):
+        if st.button("🔄 Confirmar Reinicio", type="secondary"):
+            conn.execute("DELETE FROM docentes_cursos WHERE profesor=?", (profesor,))
+            conn.execute("DELETE FROM estudiantes WHERE profesor=?", (profesor,))
+            conn.execute("DELETE FROM asistencias WHERE profesor=?", (profesor,))
             conn.commit()
-            st.success("✅ Operación exitosa. La aplicación ha sido reiniciada correctamente.")
+            st.success("✅ Operación exitosa. Tus datos han sido reiniciados.")
             st.rerun()
 
 st.caption(f"{APP_NAME} • {COLEGIO} • Desarrollado por {CREADOR}")
