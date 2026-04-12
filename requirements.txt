@@ -1,6 +1,6 @@
 streamlit
 pandas
 qrcode
-pillow
+qrcode[pil]
 reportlab
 openpyxl
