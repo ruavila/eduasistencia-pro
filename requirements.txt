@@ -1,4 +1,4 @@
-streamlit&gt
+streamlit
 pandas
 qrcode
 pillow
