@@ -5,3 +5,5 @@ qrcode[pil]
 reportlab
 openpyxl
 xlrd  # Solo si mantienes xls
+pyzbar
+numpy
