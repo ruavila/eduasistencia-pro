@@ -119,7 +119,7 @@ menu = st.sidebar.selectbox("Menú principal:", [
     "5. Reiniciar mis datos"
 ])
 
-# 1. MIS CURSOS - Eliminación corregida
+# 1. MIS CURSOS - Eliminación ultra robusta
 if menu == "1. Mis Cursos (Agregar / Eliminar)":
     st.header("📚 Mis Cursos")
     df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=? ORDER BY grado, materia", conn, params=(profesor,))
@@ -132,7 +132,7 @@ if menu == "1. Mis Cursos (Agregar / Eliminar)":
         curso_elim = st.selectbox("Selecciona el curso a eliminar", 
                                   [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()], 
                                   key="curso_eliminar_key")
-        
+
         if st.button("🗑️ Eliminar curso seleccionado", type="secondary"):
             if st.checkbox("Confirmo que deseo eliminar este curso y todos sus estudiantes"):
                 g, m = [x.strip() for x in curso_elim.split(" - ")]
@@ -141,7 +141,7 @@ if menu == "1. Mis Cursos (Agregar / Eliminar)":
                 conn.execute("DELETE FROM asistencias WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
                 conn.commit()
                 st.success(f"✅ Operación exitosa. Curso **{g} - {m}** eliminado correctamente")
-                st.rerun()   # ← Esto es clave para actualizar la lista
+                st.rerun()
     else:
         st.info("Aún no tienes cursos registrados.")
 
@@ -165,7 +165,7 @@ elif menu == "2. Gestionar Estudiantes y Generar PDF":
     st.header("👥 Gestionar Estudiantes y Generar PDF")
     df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
     if df_cursos.empty:
-        st.warning("Agrega cursos primero en la opción 1")
+        st.warning("Agrega cursos primero")
     else:
         lista = [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()]
         seleccion = st.selectbox("Selecciona curso", lista)
@@ -174,13 +174,12 @@ elif menu == "2. Gestionar Estudiantes y Generar PDF":
         st.subheader("📁 Subir lista de estudiantes")
         st.markdown("""
         <div style='background:#FFF3CD; padding:15px; border-radius:10px; border:2px solid #FFC107;'>
-        📱 <strong>Desde celular (Samsung/Chrome):</strong><br>
-        • Toca "Examinar" y selecciona el archivo rápidamente<br>
-        • Formatos aceptados: .xlsx, .xls, .csv
+        📱 <strong>Consejo para celular:</strong><br>
+        Toca "Examinar" y selecciona el archivo rápidamente (menos de 10 segundos).
         </div>
         """, unsafe_allow_html=True)
 
-        archivo = st.file_uploader("Selecciona el archivo", type=["xlsx", "xls", "csv"], key="file_uploader_key")
+        archivo = st.file_uploader("Selecciona el archivo Excel o CSV", type=["xlsx", "xls", "csv"], key="uploader_key")
 
         if archivo is not None:
             try:
@@ -194,14 +193,14 @@ elif menu == "2. Gestionar Estudiantes y Generar PDF":
                     df = df.rename(columns={"id": "estudiante_id"})
 
                 if "estudiante_id" not in df.columns or "nombre" not in df.columns:
-                    st.error("El archivo debe tener columnas: estudiante_id y nombre")
+                    st.error("El archivo debe tener las columnas: estudiante_id y nombre")
                 else:
                     df["profesor"] = profesor
                     df["grado"] = grado
                     df["materia"] = materia
                     df = df[["profesor", "grado", "materia", "estudiante_id", "nombre"]].drop_duplicates()
 
-                    if st.button("💾 Guardar estudiantes", type="primary"):
+                    if st.button("💾 Guardar estudiantes en la base de datos", type="primary"):
                         agregados = 0
                         for _, row in df.iterrows():
                             try:
@@ -215,7 +214,7 @@ elif menu == "2. Gestionar Estudiantes y Generar PDF":
                         st.rerun()
             except Exception as e:
                 st.error(f"Error al leer el archivo: {str(e)}")
-                st.info("Intenta guardar el archivo como .xlsx desde Excel")
+                st.info("Intenta guardar el archivo como .xlsx desde Excel y subirlo de nuevo.")
 
         if st.button("📄 Generar PDF con QR (4x4 cm)", type="primary"):
             df_para_pdf = pd.read_sql(
