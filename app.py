@@ -79,7 +79,6 @@ nombre_docente = st.session_state.nombre_docente
 if profesor is None:
     st.header("🔑 Acceso al Sistema")
     tab1, tab2 = st.tabs(["Iniciar Sesión", "Registrarse"])
-    
     with tab1:
         username = st.text_input("Usuario", key="login_user")
         password = st.text_input("Contraseña", type="password", key="login_pass")
@@ -95,7 +94,6 @@ if profesor is None:
                     st.rerun()
                 else:
                     st.error("❌ Usuario o contraseña incorrectos")
-    
     with tab2:
         nuevo_user = st.text_input("Usuario", key="reg_user")
         nuevo_nombre = st.text_input("Nombre completo", key="reg_nombre")
@@ -111,7 +109,6 @@ if profesor is None:
                     st.error("❌ Ese usuario ya existe")
 
 else:
-    # ====================== MENÚ ======================
     st.sidebar.success(f"✅ Conectado como: {nombre_docente}")
     if st.sidebar.button("Cerrar Sesión"):
         st.session_state.profesor_actual = None
@@ -130,7 +127,6 @@ else:
     if menu == "1. Mis Cursos (Agregar / Eliminar)":
         st.header("📚 Mis Cursos")
         df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=? ORDER BY grado, materia", conn, params=(profesor,))
-        
         if not df_cursos.empty:
             st.subheader("Cursos registrados")
             st.dataframe(df_cursos, use_container_width=True)
@@ -162,12 +158,11 @@ else:
                 except:
                     st.warning("Este curso ya existe para ti")
 
-    # 2. GESTIONAR ESTUDIANTES - VERSIÓN SIMPLIFICADA PARA CELULAR
+    # 2. GESTIONAR ESTUDIANTES - VERSIÓN MÁS ROBUSTA PARA CELULAR
     elif menu == "2. Gestionar Estudiantes y Generar PDF":
         st.header("👥 Gestionar Estudiantes y Generar PDF")
         
         df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
-        
         if df_cursos.empty:
             st.warning("Agrega cursos primero")
         else:
@@ -177,21 +172,23 @@ else:
 
             st.subheader("📁 Subir lista de estudiantes")
             st.markdown("""
-            <div style='background:#FFF3CD; padding:20px; border-radius:12px; border:3px solid #FFC107; font-size:1.1em;'>
-            📱 <strong>INSTRUCCIONES PARA CELULAR:</strong><br><br>
-            1. Toca el botón <strong>"Examinar"</strong> y selecciona tu archivo Excel<br>
+            <div style='background:#FFF3CD; padding:20px; border-radius:12px; border:3px solid #FFC107; font-size:1.1em; line-height:1.4;'>
+            📱 <strong>PARA CELULAR:</strong><br><br>
+            1. Toca "Examinar" y selecciona tu archivo<br>
             2. Espera 3-5 segundos<br>
             3. Presiona el botón <strong>"🔄 Procesar archivo seleccionado"</strong><br>
-            4. Cuando veas la tabla de estudiantes, presiona "Guardar"
+            4. Cuando veas la tabla → presiona Guardar
             </div>
             """, unsafe_allow_html=True)
 
+            # Uploader con clave fija
             archivo = st.file_uploader(
                 "Selecciona el archivo Excel o CSV", 
                 type=["xlsx", "xls", "csv"], 
-                key="file_uploader_estudiantes_fixed"
+                key="file_uploader_estudiantes_fixed_2026"
             )
 
+            # Botón de procesar SIEMPRE visible cuando hay archivo
             if archivo is not None:
                 if st.button("🔄 Procesar archivo seleccionado", type="secondary"):
                     try:
@@ -213,15 +210,15 @@ else:
                             df = df[["profesor", "grado", "materia", "estudiante_id", "nombre"]].drop_duplicates()
                             
                             st.session_state.uploaded_students_df = df
-                            st.success(f"✅ Archivo procesado correctamente: **{len(df)} estudiantes**")
+                            st.success(f"✅ Archivo procesado: **{len(df)} estudiantes**")
                             st.dataframe(df[["estudiante_id", "nombre"]], use_container_width=True)
                             st.rerun()
                     except Exception as e:
-                        st.error(f"❌ Error al leer el archivo: {str(e)}")
+                        st.error(f"❌ Error: {str(e)}")
             else:
-                st.info("👆 Primero selecciona tu archivo Excel o CSV")
+                st.info("👆 Selecciona tu archivo Excel o CSV")
 
-            # Guardar estudiantes
+            # Guardar
             if st.session_state.uploaded_students_df is not None:
                 if st.button("💾 Guardar estudiantes en la base de datos", type="primary"):
                     df = st.session_state.uploaded_students_df
@@ -257,7 +254,6 @@ else:
                         spacing_x = 25
                         spacing_y = 65
                         cols = 3
-                        
                         for i, (_, row) in enumerate(df_para_pdf.iterrows()):
                             if i % (cols * 4) == 0 and i != 0:
                                 c.showPage()
@@ -265,20 +261,17 @@ else:
                             row_num = (i // cols) % 4
                             x = margin_x + col * (qr_size + spacing_x)
                             y = height - margin_y - row_num * (qr_size + spacing_y)
-                            
                             qr_img = generar_qr(row["estudiante_id"])
                             qr_pil = Image.open(qr_img)
                             qr_path = BytesIO()
                             qr_pil.save(qr_path, format="PNG")
                             qr_path.seek(0)
                             c.drawImage(ImageReader(qr_path), x, y - qr_size, width=qr_size, height=qr_size)
-                            
                             nombre_corto = abreviar_nombre(row["nombre"])
                             c.setFont("Helvetica-Bold", 9)
                             c.drawCentredString(x + qr_size/2, y - qr_size - 15, nombre_corto)
                             c.setFont("Helvetica", 8)
                             c.drawCentredString(x + qr_size/2, y - qr_size - 27, f"{grado} - {materia}")
-                        
                         c.save()
                         pdf_buffer.seek(0)
                         st.download_button(
@@ -288,7 +281,7 @@ else:
                             mime="application/pdf"
                         )
 
-    # 3. ESCANEAR ASISTENCIA
+    # 3. ESCANEAR
     elif menu == "3. Escanear Asistencia con Cámara":
         st.header("📸 Escanear QR del estudiante")
         df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
@@ -298,15 +291,12 @@ else:
             lista = [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()]
             sel = st.selectbox("Selecciona curso", lista)
             grado, materia = [x.strip() for x in sel.split(" - ")]
-            
             picture = st.camera_input("Apunta al QR y toma la foto", key="cam_key")
-            
             if picture is not None:
                 bytes_data = picture.getvalue()
                 cv2_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
                 detector = cv2.QRCodeDetector()
                 data, _, _ = detector.detectAndDecode(cv2_img)
-                
                 if data:
                     est_id = data.strip()
                     info = pd.read_sql("SELECT nombre FROM estudiantes WHERE profesor=? AND estudiante_id=? AND grado=? AND materia=?", 
@@ -329,7 +319,6 @@ else:
                                 st.warning("Este estudiante ya tiene asistencia hoy")
                 else:
                     st.error("No se pudo leer el QR. Acerca más la cámara.")
-
             if st.button("✅ Listo - Escanear siguiente"):
                 if "cam_key" in st.session_state:
                     del st.session_state.cam_key
@@ -345,14 +334,12 @@ else:
             lista = [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()]
             sel = st.selectbox("Selecciona curso", lista)
             grado, materia = [x.strip() for x in sel.split(" - ")]
-            
             data = pd.read_sql("""
                 SELECT e.nombre, a.fecha 
                 FROM asistencias a 
                 JOIN estudiantes e ON a.estudiante_id = e.estudiante_id 
                 WHERE a.profesor=? AND a.grado=? AND a.materia=?
             """, conn, params=(profesor, grado, materia))
-            
             if data.empty:
                 st.info("Todavía no hay asistencias")
             else:
@@ -360,13 +347,11 @@ else:
                 tabla = pd.DataFrame(index=sorted(data['nombre'].unique()), columns=fechas).fillna("Ausente")
                 for _, row in data.iterrows():
                     tabla.loc[row['nombre'], row['fecha']] = "Presente"
-                
                 tabla['Total Presente'] = (tabla == "Presente").sum(axis=1)
                 tabla['Total Ausente'] = len(fechas) - tabla['Total Presente']
                 tabla['% Asistencia'] = ((tabla['Total Presente'] / len(fechas)) * 100).round(1) if len(fechas) > 0 else 0
                 tabla = tabla.reset_index().rename(columns={'index': 'Estudiante'})
                 st.dataframe(tabla, use_container_width=True)
-                
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
                     pd.DataFrame([[f"ASISTENCIA - {materia} - GRADO {grado}"]]).to_excel(writer, startrow=0, header=False, index=False)
