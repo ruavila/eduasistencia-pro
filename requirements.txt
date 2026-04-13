@@ -4,5 +4,3 @@ qrcode
 qrcode[pil]
 reportlab
 openpyxl
-pyzbar
-numpy
