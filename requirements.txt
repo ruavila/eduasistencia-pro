@@ -6,3 +6,4 @@ reportlab
 openpyxl
 xlrd  # Solo si mantienes xls
 opencv-python-headless
+numpy
