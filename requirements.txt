@@ -1,6 +1,7 @@
 streamlit
 pandas
-qrcode
 qrcode[pil]
 reportlab
 openpyxl
+pillow
+pyzbar   # si usas decode en la cámara (aunque no lo usaste aquí)
