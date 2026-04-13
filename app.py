@@ -36,10 +36,6 @@ def generar_qr(texto):
     buffer.seek(0)
     return buffer
 
-def obtener_nombre_docente(profesor):
-    res = conn.execute("SELECT nombre_completo FROM profesores WHERE username=?", (profesor,)).fetchone()
-    return res[0] if res else ""
-
 def abreviar_nombre(nombre):
     partes = nombre.strip().split()
     if len(partes) <= 2:
@@ -90,9 +86,6 @@ if st.session_state.profesor_actual is None:
                     st.rerun()
                 else:
                     st.error("Usuario o contraseña incorrectos")
-            else:
-                st.warning("Ingresa usuario y contraseña")
-
     with tab2:
         nuevo_user = st.text_input("Usuario", key="reg_user")
         nuevo_nombre = st.text_input("Nombre completo", key="reg_nombre")
@@ -106,11 +99,8 @@ if st.session_state.profesor_actual is None:
                     st.success("Registro exitoso. Ahora inicia sesión.")
                 except:
                     st.error("Ese usuario ya existe")
-            else:
-                st.error("Completa todos los campos")
     st.stop()
 
-# ====================== USUARIO LOGUEADO ======================
 profesor = st.session_state.profesor_actual
 nombre_docente = st.session_state.nombre_docente
 
@@ -170,28 +160,18 @@ if menu == "1. Mis Cursos (Agregar / Eliminar)":
             except:
                 st.warning("Este curso ya existe para ti")
 
-# 2. GESTIONAR ESTUDIANTES Y GENERAR PDF - Optimizado para Celular
+# 2. GESTIONAR ESTUDIANTES Y GENERAR PDF
 elif menu == "2. Gestionar Estudiantes y Generar PDF":
     st.header("👥 Gestionar Estudiantes y Generar PDF")
     df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
     if df_cursos.empty:
-        st.warning("Agrega cursos primero en la opción 1")
+        st.warning("Agrega cursos primero")
     else:
         lista = [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()]
         seleccion = st.selectbox("Selecciona curso", lista)
         grado, materia = [x.strip() for x in seleccion.split(" - ")]
 
-        st.subheader("📁 Subir lista de estudiantes")
-        st.markdown("""
-        <div style='background:#FFF3CD; padding:15px; border-radius:10px; border:2px solid #FFC107;'>
-        📱 <strong>Desde celular:</strong><br>
-        • Usa Chrome o Google<br>
-        • Toca "Examinar" y selecciona el archivo rápidamente<br>
-        • Formatos: .xlsx, .xls, .csv
-        </div>
-        """, unsafe_allow_html=True)
-
-        archivo = st.file_uploader("Selecciona el archivo", type=["xlsx", "xls", "csv"], key="file_uploader_key")
+        archivo = st.file_uploader("Sube lista de estudiantes (Excel o CSV)", type=["xlsx", "xls", "csv"], key="file_uploader_key")
 
         if archivo is not None:
             try:
@@ -277,8 +257,8 @@ elif menu == "2. Gestionar Estudiantes y Generar PDF":
                     mime="application/pdf"
                 )
 
-# 4. ESCANEAR
-elif menu == "4. Escanear Asistencia con Cámara":
+# 3. ESCANEAR
+elif menu == "3. Escanear Asistencia con Cámara":
     st.header("📸 Escanear QR del estudiante")
     df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
     if df_cursos.empty:
@@ -321,8 +301,8 @@ elif menu == "4. Escanear Asistencia con Cámara":
                 st.session_state.cam_key = None
                 st.rerun()
 
-# 5. REPORTE
-elif menu == "5. Reporte y Descargar Excel":
+# 4. REPORTE
+elif menu == "4. Reporte y Descargar Excel":
     st.header("📊 Reporte de Asistencia")
     df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
     if df_cursos.empty:
@@ -362,8 +342,8 @@ elif menu == "5. Reporte y Descargar Excel":
             output.seek(0)
             st.download_button("📥 Descargar Excel", output, f"Asistencia_{grado}_{materia}.xlsx")
 
-# 6. REINICIAR
-elif menu == "6. Reiniciar mis datos":
+# 5. REINICIAR
+elif menu == "5. Reiniciar mis datos":
     st.header("⚠️ Reiniciar mis datos")
     st.warning("Esta acción borrará todos tus cursos, estudiantes y asistencias.")
     if st.checkbox("Entiendo y deseo reiniciar mis datos"):
