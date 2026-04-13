@@ -4,10 +4,7 @@ from datetime import datetime
 import qrcode
 from io import BytesIO
 import sqlite3
-from PIL import Image
 import hashlib
-import numpy as np
-from pyzbar.pyzbar import decode
 
 # ====================== CONFIG ======================
 APP_NAME = "EduAsistencia Pro"
@@ -137,18 +134,9 @@ if menu == "Cursos":
         if st.button("🗑️ Eliminar curso"):
             g, m = curso_sel.split(" - ")
 
-            conn.execute(
-                "DELETE FROM docentes_cursos WHERE profesor=? AND grado=? AND materia=?",
-                (profesor, g, m)
-            )
-            conn.execute(
-                "DELETE FROM estudiantes WHERE profesor=? AND grado=? AND materia=?",
-                (profesor, g, m)
-            )
-            conn.execute(
-                "DELETE FROM asistencias WHERE profesor=? AND grado=? AND materia=?",
-                (profesor, g, m)
-            )
+            conn.execute("DELETE FROM docentes_cursos WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
+            conn.execute("DELETE FROM estudiantes WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
+            conn.execute("DELETE FROM asistencias WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
             conn.commit()
 
             st.success("Curso eliminado correctamente")
@@ -161,10 +149,7 @@ if menu == "Cursos":
 
     if st.button("Agregar curso"):
         try:
-            conn.execute(
-                "INSERT INTO docentes_cursos VALUES (?, ?, ?)",
-                (profesor, g.strip(), m.strip())
-            )
+            conn.execute("INSERT INTO docentes_cursos VALUES (?, ?, ?)", (profesor, g.strip(), m.strip()))
             conn.commit()
             st.success("Curso agregado")
             st.rerun()
@@ -217,9 +202,13 @@ elif menu == "Estudiantes":
             except Exception as e:
                 st.error(f"Error: {e}")
 
-# ====================== ESCÁNER ======================
+# ====================== ESCÁNER (SIN pyzbar) ======================
 elif menu == "Escáner QR":
-    st.header("📸 Escanear QR")
+    st.header("📸 Registro de asistencia")
+
+    st.info("📱 Escanea el QR con tu celular y pega el código aquí")
+
+    codigo = st.text_input("Código del estudiante")
 
     df_cursos = pd.read_sql(
         "SELECT grado, materia FROM docentes_cursos WHERE profesor=?",
@@ -233,29 +222,22 @@ elif menu == "Escáner QR":
         sel = st.selectbox("Curso", lista)
         grado, materia = sel.split(" - ")
 
-        foto = st.camera_input("Tomar foto del QR")
-
-        if foto:
-            img = Image.open(foto)
-            decoded = decode(np.array(img))
-
-            if decoded:
-                est_id = decoded[0].data.decode()
-
+        if st.button("Registrar asistencia"):
+            if codigo:
                 fecha = datetime.now().strftime("%Y-%m-%d")
                 hora = datetime.now().strftime("%H:%M:%S")
 
                 try:
                     conn.execute(
                         "INSERT INTO asistencias VALUES (?,?,?,?,?,?)",
-                        (profesor, grado, materia, est_id, fecha, hora)
+                        (profesor, grado, materia, codigo, fecha, hora)
                     )
                     conn.commit()
                     st.success("Asistencia registrada")
                 except:
                     st.warning("Ya registrado hoy")
             else:
-                st.error("No se detectó QR")
+                st.error("Ingresa un código")
 
 # ====================== REPORTE ======================
 elif menu == "Reporte":
