@@ -10,17 +10,19 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 import hashlib
 import numpy as np
-import cv2
+from pyzbar.pyzbar import decode
 
 # ====================== CONFIGURACIÓN ======================
 APP_NAME = "EduAsistencia Pro"
 APP_SUBTITLE = "Sistema Inteligente de Asistencia con Código QR"
 CREADOR = "Rubén Darío Ávila Sandoval"
 COLEGIO = "Institución Educativa San Antonio de Padua"
+ESCUDO_PATH = "escudo.png"
 
 # ====================== BASE DE DATOS ======================
 conn = sqlite3.connect("asistencia.db", check_same_thread=False)
 
+conn.execute("CREATE TABLE IF NOT EXISTS config (clave TEXT PRIMARY KEY, valor TEXT)")
 conn.execute("CREATE TABLE IF NOT EXISTS profesores (username TEXT PRIMARY KEY, password_hash TEXT, nombre_completo TEXT)")
 conn.execute("CREATE TABLE IF NOT EXISTS docentes_cursos (profesor TEXT, grado TEXT, materia TEXT, PRIMARY KEY (profesor, grado, materia))")
 conn.execute("CREATE TABLE IF NOT EXISTS estudiantes (profesor TEXT, grado TEXT, materia TEXT, estudiante_id TEXT, nombre TEXT, PRIMARY KEY (profesor, grado, materia, estudiante_id))")
@@ -36,11 +38,32 @@ def generar_qr(texto):
     buffer.seek(0)
     return buffer
 
+def abreviar_nombre(nombre):
+    partes = nombre.strip().split()
+    if len(partes) <= 2:
+        return nombre
+    iniciales = [p[0].upper() + "." for p in partes[:-1]]
+    return " ".join(iniciales) + " " + partes[-1]
+
 # ====================== INTERFAZ ======================
 st.set_page_config(page_title=APP_NAME, layout="wide")
 
-st.title(APP_NAME)
-st.caption(APP_SUBTITLE)
+col_escudo, col_titulo = st.columns([1, 4])
+with col_escudo:
+    try:
+        escudo = Image.open(ESCUDO_PATH)
+        st.image(escudo, width=120)
+    except:
+        pass
+
+with col_titulo:
+    st.markdown(f"""
+        <h1 style='color:#1E3A8A;'>{APP_NAME}</h1>
+        <h4>{APP_SUBTITLE}</h4>
+        <p>{COLEGIO} • {CREADOR}</p>
+    """, unsafe_allow_html=True)
+
+st.markdown("---")
 
 # ====================== LOGIN ======================
 if 'profesor_actual' not in st.session_state:
@@ -66,22 +89,6 @@ if st.session_state.profesor_actual is None:
         else:
             st.error("Credenciales incorrectas")
 
-    st.markdown("### 🔐 Recuperar contraseña")
-    user_rec = st.text_input("Usuario para recuperar")
-
-    if st.button("Buscar usuario"):
-        res = conn.execute("SELECT nombre_completo FROM profesores WHERE username=?", (user_rec,)).fetchone()
-        if res:
-            st.success(f"Usuario encontrado: {res[0]}")
-            nueva = st.text_input("Nueva contraseña", type="password")
-            if st.button("Actualizar contraseña"):
-                conn.execute("UPDATE profesores SET password_hash=? WHERE username=?",
-                             (hash_password(nueva), user_rec))
-                conn.commit()
-                st.success("Contraseña actualizada")
-        else:
-            st.error("Usuario no encontrado")
-
     st.stop()
 
 profesor = st.session_state.profesor_actual
@@ -100,30 +107,47 @@ menu = st.sidebar.selectbox("Menú", [
 if menu == "Cursos":
     st.header("📚 Cursos")
 
-    df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
+    df_cursos = pd.read_sql(
+        "SELECT grado, materia FROM docentes_cursos WHERE profesor=?",
+        conn,
+        params=(profesor,)
+    )
 
     if not df_cursos.empty:
-        st.subheader("Cursos registrados")
+        st.dataframe(df_cursos, use_container_width=True)
 
-        df_cursos["Seleccionar"] = False
+        curso = st.selectbox(
+            "Selecciona curso a eliminar",
+            [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()]
+        )
 
-        edited_df = st.data_editor(df_cursos, use_container_width=True)
+        if "confirmar_eliminar" not in st.session_state:
+            st.session_state.confirmar_eliminar = False
 
-        seleccionados = edited_df[edited_df["Seleccionar"] == True]
+        if st.button("🗑️ Eliminar curso"):
+            st.session_state.confirmar_eliminar = True
 
-        if not seleccionados.empty:
-            if st.button("🗑️ Eliminar cursos seleccionados"):
-                for _, row in seleccionados.iterrows():
-                    g = row["grado"]
-                    m = row["materia"]
+        if st.session_state.confirmar_eliminar:
+            st.warning("⚠️ Esta acción eliminará TODO el curso")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                if st.button("✅ Confirmar"):
+                    g, m = curso.split(" - ")
 
                     conn.execute("DELETE FROM docentes_cursos WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
                     conn.execute("DELETE FROM estudiantes WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
                     conn.execute("DELETE FROM asistencias WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
+                    conn.commit()
 
-                conn.commit()
-                st.success("Cursos eliminados correctamente")
-                st.rerun()
+                    st.session_state.confirmar_eliminar = False
+                    st.success("Curso eliminado correctamente")
+                    st.rerun()
+
+            with col2:
+                if st.button("❌ Cancelar"):
+                    st.session_state.confirmar_eliminar = False
 
     st.subheader("➕ Agregar curso")
 
@@ -164,6 +188,7 @@ elif menu == "Estudiantes":
                 elif nombre.endswith(".xlsx"):
                     df = pd.read_excel(archivo, engine="openpyxl")
                 else:
+                    st.warning("Convierte a .xlsx si falla")
                     df = pd.read_excel(archivo)
 
                 df.columns = [c.lower().strip() for c in df.columns]
@@ -172,6 +197,7 @@ elif menu == "Estudiantes":
                     st.error("Debe tener columnas: estudiante_id y nombre")
                 else:
                     agregados = 0
+
                     for _, row in df.iterrows():
                         try:
                             conn.execute(
@@ -202,14 +228,11 @@ elif menu == "Escáner QR":
         foto = st.camera_input("Tomar foto del QR")
 
         if foto:
-            file_bytes = np.asarray(bytearray(foto.read()), dtype=np.uint8)
-            img = cv2.imdecode(file_bytes, 1)
+            img = Image.open(foto)
+            decoded = decode(np.array(img))
 
-            detector = cv2.QRCodeDetector()
-            data, bbox, _ = detector.detectAndDecode(img)
-
-            if data:
-                est_id = data
+            if decoded:
+                est_id = decoded[0].data.decode()
 
                 fecha = datetime.now().strftime("%Y-%m-%d")
                 hora = datetime.now().strftime("%H:%M:%S")
@@ -220,7 +243,7 @@ elif menu == "Escáner QR":
                         (profesor, grado, materia, est_id, fecha, hora)
                     )
                     conn.commit()
-                    st.success(f"✅ Asistencia registrada: {est_id}")
+                    st.success("Asistencia registrada")
                 except:
                     st.warning("Ya registrado hoy")
             else:
