@@ -107,93 +107,88 @@ if menu == "1. Mis Cursos (Agregar / Eliminar)":
     st.header("📚 Mis Cursos")
 
     df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
-    st.dataframe(df_cursos)
+    st.dataframe(df_cursos, use_container_width=True)
 
-    grado = st.text_input("Grado")
-    materia = st.text_input("Materia")
+    col1, col2 = st.columns(2)
+    with col1:
+        nuevo_g = st.text_input("Grado")
+    with col2:
+        nuevo_m = st.text_input("Materia")
 
     if st.button("Agregar curso"):
         try:
             conn.execute("INSERT INTO docentes_cursos VALUES (?, ?, ?)", 
-                         (profesor, grado, materia))
+                         (profesor, nuevo_g.strip().upper(), nuevo_m.strip()))
             conn.commit()
-            st.success("Curso agregado")
+            st.success("Curso agregado correctamente")
             st.rerun()
         except:
             st.warning("Este curso ya existe")
 
 # ====================== 2. ESTUDIANTES ======================
 elif menu == "2. Gestionar Estudiantes y Generar PDF":
-    st.header("👥 Estudiantes")
+    st.header("👥 Gestionar Estudiantes")
 
     df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
     
     if df_cursos.empty:
         st.warning("Agrega cursos primero")
     else:
-        seleccion = st.selectbox("Curso", [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()])
+        seleccion = st.selectbox("Selecciona curso", [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()])
         grado, materia = [x.strip() for x in seleccion.split(" - ")]
 
         archivo = st.file_uploader("Subir Excel o CSV", type=["xlsx","xls","csv"])
 
-        # 🔥 SOLUCIÓN CELULAR
+        # 🔥 SOLUCIÓN DEFINITIVA CELULAR
         if archivo is not None:
             try:
-                if archivo.name.endswith(".csv"):
+                if archivo.name.lower().endswith('.csv'):
                     df = pd.read_csv(archivo)
                 else:
                     df = pd.read_excel(archivo)
 
-                df.columns = [c.lower().strip() for c in df.columns]
+                df.columns = [str(c).strip().lower() for c in df.columns]
 
                 if "id" in df.columns:
-                    df.rename(columns={"id":"estudiante_id"}, inplace=True)
+                    df = df.rename(columns={"id": "estudiante_id"})
 
                 if "estudiante_id" not in df.columns or "nombre" not in df.columns:
-                    st.error("Debe tener columnas: estudiante_id y nombre")
+                    st.error("El archivo debe tener columnas: estudiante_id y nombre")
                 else:
                     df["profesor"] = profesor
                     df["grado"] = grado
                     df["materia"] = materia
 
-                    st.session_state["temp_est"] = df
-                    st.success(f"Archivo cargado ({len(df)} estudiantes)")
+                    agregados = 0
+                    for _, row in df.iterrows():
+                        try:
+                            conn.execute("INSERT INTO estudiantes VALUES (?,?,?,?,?)", 
+                                         (row["profesor"], row["grado"], row["materia"], row["estudiante_id"], row["nombre"]))
+                            agregados += 1
+                        except:
+                            pass
+
+                    conn.commit()
+                    st.success(f"✅ Se guardaron automáticamente {agregados} estudiantes")
 
             except Exception as e:
-                st.error(str(e))
+                st.error(f"Error al leer archivo: {str(e)}")
 
-        if "temp_est" in st.session_state:
-            if st.button("💾 Guardar estudiantes en la base de datos"):
-                df = st.session_state["temp_est"]
-                agregados = 0
-
-                for _, r in df.iterrows():
-                    try:
-                        conn.execute("INSERT INTO estudiantes VALUES (?,?,?,?,?)",
-                                     (r["profesor"], r["grado"], r["materia"], r["estudiante_id"], r["nombre"]))
-                        agregados += 1
-                    except:
-                        pass
-
-                conn.commit()
-                st.success(f"Guardados: {agregados}")
-                del st.session_state["temp_est"]
-                st.rerun()
-
+        # PDF ORIGINAL
         if st.button("📄 Generar PDF con QR"):
-            df_pdf = pd.read_sql(
+            df_para_pdf = pd.read_sql(
                 "SELECT estudiante_id, nombre FROM estudiantes WHERE profesor=? AND grado=? AND materia=?",
                 conn, params=(profesor, grado, materia)
             )
 
-            if df_pdf.empty:
+            if df_para_pdf.empty:
                 st.warning("No hay estudiantes")
             else:
                 st.success("PDF generado correctamente")
 
 # ====================== 3. ESCANEAR ======================
 elif menu == "3. Escanear Asistencia con Cámara":
-    st.header("📸 Escanear QR")
+    st.header("📸 Escaneo QR")
     st.info("Función original intacta")
 
 # ====================== 4. REPORTE ======================
@@ -203,13 +198,14 @@ elif menu == "4. Reporte y Descargar Excel":
 
 # ====================== 5. REINICIAR ======================
 elif menu == "5. Reiniciar mis datos":
-    st.header("⚠️ Reiniciar")
-    if st.button("Confirmar"):
+    st.header("⚠️ Reiniciar datos")
+    if st.button("Confirmar reinicio"):
         conn.execute("DELETE FROM docentes_cursos WHERE profesor=?", (profesor,))
         conn.execute("DELETE FROM estudiantes WHERE profesor=?", (profesor,))
         conn.execute("DELETE FROM asistencias WHERE profesor=?", (profesor,))
         conn.commit()
-        st.success("Datos eliminados")
+        st.success("Datos eliminados correctamente")
         st.rerun()
 
+# ====================== FOOTER ======================
 st.caption(f"{APP_NAME} • {COLEGIO} • {CREADOR}")
