@@ -216,34 +216,83 @@ else:
                     conn.commit()
                     st.success("Guardado correctamente")
                     st.session_state.uploaded_students_df = None
-                    st.session_state.archivo_subido = None
+
+            # ✅ GENERAR PDF QR
+            if st.button("📄 Generar PDF con QR (4x4 cm)"):
+                df_para_pdf = pd.read_sql(
+                    "SELECT estudiante_id, nombre FROM estudiantes WHERE profesor=? AND grado=? AND materia=? ORDER BY nombre",
+                    conn, params=(profesor, grado, materia)
+                )
+
+                if df_para_pdf.empty:
+                    st.warning("No hay estudiantes en este curso.")
+                else:
+                    pdf_buffer = BytesIO()
+                    c = canvas.Canvas(pdf_buffer, pagesize=A4)
+                    width, height = A4
+
+                    qr_size = 113.3858
+                    margin_x = 45
+                    margin_y = 70
+                    spacing_x = 25
+                    spacing_y = 65
+                    cols = 3
+
+                    for i, (_, row) in enumerate(df_para_pdf.iterrows()):
+                        if i % (cols * 4) == 0 and i != 0:
+                            c.showPage()
+
+                        col = i % cols
+                        row_num = (i // cols) % 4
+
+                        x = margin_x + col * (qr_size + spacing_x)
+                        y = height - margin_y - row_num * (qr_size + spacing_y)
+
+                        qr_img = generar_qr(row["estudiante_id"])
+                        qr_pil = Image.open(qr_img)
+
+                        qr_path = BytesIO()
+                        qr_pil.save(qr_path, format="PNG")
+                        qr_path.seek(0)
+
+                        c.drawImage(ImageReader(qr_path), x, y - qr_size, width=qr_size, height=qr_size)
+
+                        nombre_corto = abreviar_nombre(row["nombre"])
+                        c.setFont("Helvetica-Bold", 9)
+                        c.drawCentredString(x + qr_size/2, y - qr_size - 15, nombre_corto)
+
+                        c.setFont("Helvetica", 8)
+                        c.drawCentredString(x + qr_size/2, y - qr_size - 27, f"{grado} - {materia}")
+
+                    c.save()
+                    pdf_buffer.seek(0)
+
+                    st.download_button(
+                        "⬇️ Descargar PDF",
+                        pdf_buffer,
+                        file_name=f"QR_{grado}_{materia}.pdf",
+                        mime="application/pdf"
+                    )
 
     # ====================== 3. ESCANEAR ======================
     elif menu == "3. Escanear Asistencia con Cámara":
         st.header("📸 Escanear QR")
 
-        df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
-        if not df_cursos.empty:
-            lista = [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()]
-            sel = st.selectbox("Curso", lista)
-            grado, materia = [x.strip() for x in sel.split(" - ")]
+        picture = st.camera_input("Tomar foto QR")
 
-            picture = st.camera_input("Tomar foto QR")
+        if picture:
+            img = cv2.imdecode(np.frombuffer(picture.getvalue(), np.uint8), 1)
+            detector = cv2.QRCodeDetector()
+            data, _, _ = detector.detectAndDecode(img)
 
-            if picture:
-                img = cv2.imdecode(np.frombuffer(picture.getvalue(), np.uint8), 1)
-                detector = cv2.QRCodeDetector()
-                data, _, _ = detector.detectAndDecode(img)
-
-                if data:
-                    st.success(f"Asistencia registrada: {data}")
-                else:
-                    st.error("No se detectó QR")
+            if data:
+                st.success(f"Asistencia registrada: {data}")
+            else:
+                st.error("No se detectó QR")
 
     # ====================== 4. REPORTE ======================
     elif menu == "4. Reporte y Descargar Excel":
         st.header("📊 Reporte")
-
         data = pd.read_sql("SELECT * FROM asistencias WHERE profesor=?", conn, params=(profesor,))
         if not data.empty:
             st.dataframe(data)
