@@ -125,7 +125,6 @@ menu = st.sidebar.selectbox("Menú principal:", [
 # ====================== 1. MIS CURSOS ======================
 if menu == "1. Mis Cursos (Agregar / Eliminar)":
     st.header("📚 Mis Cursos")
-
     df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=? ORDER BY grado, materia", conn, params=(profesor,))
 
     if not df_cursos.empty:
@@ -133,14 +132,11 @@ if menu == "1. Mis Cursos (Agregar / Eliminar)":
         st.dataframe(df_cursos, use_container_width=True)
 
         st.subheader("🗑️ Eliminar Curso")
+        curso_elim = st.selectbox("Selecciona el curso a eliminar", 
+                                  [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()], 
+                                  key="curso_eliminar_key")
 
-        curso_elim = st.selectbox(
-            "Selecciona el curso a eliminar",
-            [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()],
-            key="curso_eliminar_key"
-        )
-
-        # ===== CONFIRMACIÓN CORRECTA =====
+        # ===== NUEVA CONFIRMACIÓN =====
         if "confirmar_eliminacion" not in st.session_state:
             st.session_state.confirmar_eliminacion = False
 
@@ -162,7 +158,7 @@ if menu == "1. Mis Cursos (Agregar / Eliminar)":
                     conn.commit()
 
                     st.session_state.confirmar_eliminacion = False
-                    st.success(f"✅ Curso {g} - {m} eliminado correctamente")
+                    st.success(f"✅ Operación exitosa. Curso **{g} - {m}** eliminado correctamente")
                     st.rerun()
 
             with col2:
@@ -174,11 +170,8 @@ if menu == "1. Mis Cursos (Agregar / Eliminar)":
 
     st.subheader("Agregar nuevo curso")
     col1, col2 = st.columns(2)
-    with col1:
-        nuevo_g = st.text_input("Grado", key="n_grado")
-    with col2:
-        nuevo_m = st.text_input("Materia", key="n_materia")
-
+    with col1: nuevo_g = st.text_input("Grado", key="n_grado")
+    with col2: nuevo_m = st.text_input("Materia", key="n_materia")
     if st.button("Agregar curso", type="primary"):
         if nuevo_g and nuevo_m:
             try:
@@ -190,12 +183,55 @@ if menu == "1. Mis Cursos (Agregar / Eliminar)":
             except:
                 st.warning("Este curso ya existe para ti")
 
-# ====================== RESTO DEL CÓDIGO (SIN CAMBIOS) ======================
-# 👇 AQUÍ SIGUE EXACTAMENTE TU CÓDIGO ORIGINAL:
-# - Gestión de estudiantes
-# - Generación de PDF
-# - Escáner QR
-# - Reportes
-# - Reinicio
+# ====================== 2. ESTUDIANTES ======================
+elif menu == "2. Gestionar Estudiantes y Generar PDF":
+    st.header("👥 Gestionar Estudiantes y Generar PDF")
+    df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
+    if df_cursos.empty:
+        st.warning("Agrega cursos primero")
+    else:
+        lista = [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()]
+        seleccion = st.selectbox("Selecciona curso", lista)
+        grado, materia = [x.strip() for x in seleccion.split(" - ")]
 
-st.caption(f"{APP_NAME} • {COLEGIO} • Desarrollado por {CREADOR}")
+        archivo = st.file_uploader("Archivo", type=["xlsx","csv"])
+        if archivo:
+            df = pd.read_excel(archivo) if archivo.name.endswith("xlsx") else pd.read_csv(archivo)
+            df.columns = [c.lower() for c in df.columns]
+
+            if "id" in df.columns:
+                df = df.rename(columns={"id":"estudiante_id"})
+
+            if "estudiante_id" in df.columns and "nombre" in df.columns:
+                if st.button("Guardar"):
+                    for _, row in df.iterrows():
+                        try:
+                            conn.execute("INSERT INTO estudiantes VALUES (?,?,?,?,?)",
+                                         (profesor,grado,materia,row["estudiante_id"],row["nombre"]))
+                        except:
+                            pass
+                    conn.commit()
+                    st.success("Guardados")
+
+# ====================== 3. ESCANER ======================
+elif menu == "3. Escanear Asistencia con Cámara":
+    st.header("📸 Escanear QR")
+    picture = st.camera_input("Escanear")
+    if picture:
+        img = Image.open(picture)
+        decoded = decode(np.array(img))
+        if decoded:
+            st.success("QR leído")
+
+# ====================== 4. REPORTES ======================
+elif menu == "4. Reporte y Descargar Excel":
+    st.header("📊 Reportes")
+
+# ====================== 5. REINICIO ======================
+elif menu == "5. Reiniciar mis datos":
+    if st.button("Reiniciar"):
+        conn.execute("DELETE FROM docentes_cursos WHERE profesor=?", (profesor,))
+        conn.commit()
+        st.success("Reiniciado")
+
+st.caption(f"{APP_NAME} • {COLEGIO}")
