@@ -1,9 +1,8 @@
-
 streamlit
 pandas
 qrcode[pil]
-pillow
 reportlab
+openpyxl
+Pillow
 pyzbar
 opencv-python-headless
-xlsxwriter
