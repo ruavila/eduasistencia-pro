@@ -3,6 +3,3 @@ pandas
 qrcode[pil]
 pillow
 reportlab
-openpyxl
-opencv-python-headless
-pyzbar
