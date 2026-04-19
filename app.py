@@ -17,7 +17,7 @@ APP_NAME = "EduAsistencia Pro"
 APP_SUBTITLE = "Sistema Inteligente de Asistencia con Código QR"
 CREADOR = "Rubén Darío Ávila Sandoval"
 COLEGIO = "Institución Educativa San Antonio de Padua"
-ESCUDO_PATH = "escudo.jpg"  # Corregido a .jpg según tu archivo
+ESCUDO_PATH = "escudo.png"  # Corregido a .jpg según tu archivo
 
 # ====================== BASE DE DATOS ======================
 conn = sqlite3.connect("asistencia.db", check_same_thread=False)
