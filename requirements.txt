@@ -5,3 +5,4 @@ pillow
 reportlab
 pyzbar
 opencv-python-headless
+xlsxwriter
