@@ -15,7 +15,6 @@ import urllib.parse
 
 # ====================== CONFIGURACIÓN ======================
 APP_NAME = "EduAsistencia Pro"
-APP_SUBTITLE = "Sistema Inteligente de Asistencia QR"
 CREADOR = "Rubén Darío Ávila Sandoval"
 COLEGIO = "I.E. San Antonio de Padua"
 ESCUDO_PATH = "escudo.png"
@@ -38,125 +37,110 @@ def generar_qr(texto):
     return buffer
 
 def abreviar_nombre(nombre):
-    partes = nombre.strip().split()
+    partes = str(nombre).strip().split()
     if len(partes) <= 2: return nombre
     return " ".join([p[0].upper() + "." for p in partes[:-1]]) + " " + partes[-1]
 
-# ====================== INTERFAZ ======================
-st.set_page_config(page_title=APP_NAME, layout="wide")
-
-# Estilo para evitar cierres inesperados en móvil
-st.markdown("""
-    <style>
-    .stApp { max-width: 100%; }
-    @media (max-width: 640px) {
-        .main .block-container { padding: 1rem 0.5rem; }
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-# Mantener la sesión activa
+# ====================== PERSISTENCIA DE SESIÓN ======================
 if 'profesor_actual' not in st.session_state:
     st.session_state.profesor_actual = None
 if 'nombre_docente' not in st.session_state:
     st.session_state.nombre_docente = None
 
+st.set_page_config(page_title=APP_NAME, layout="wide")
+
 # ====================== LOGIN ======================
 if st.session_state.profesor_actual is None:
-    col_escudo, col_titulo = st.columns([1, 3])
-    with col_escudo:
-        try: st.image(ESCUDO_PATH, width=100)
-        except: pass
-    with col_titulo:
-        st.title(APP_NAME)
+    st.title(f"🚀 {APP_NAME}")
+    tab1, tab2 = st.tabs(["Ingresar", "Registrarse"])
     
-    tab1, tab2 = st.tabs(["Ingresar", "Registro"])
     with tab1:
-        u = st.text_input("Usuario", key="u_login")
-        p = st.text_input("Contraseña", type="password", key="p_login")
+        u = st.text_input("Usuario", key="login_u")
+        p = st.text_input("Contraseña", type="password", key="login_p")
         if st.button("Entrar", type="primary"):
             res = conn.execute("SELECT nombre_completo FROM profesores WHERE username=? AND password_hash=?", (u, hash_password(p))).fetchone()
             if res:
                 st.session_state.profesor_actual = u
                 st.session_state.nombre_docente = res[0]
                 st.rerun()
-            else: st.error("Error de acceso")
+            else: st.error("Usuario o clave incorrectos")
     with tab2:
         nu = st.text_input("Nuevo Usuario")
         nn = st.text_input("Nombre Completo")
-        np = st.text_input("Nueva Contraseña", type="password")
-        if st.button("Registrar Docente"):
+        np = st.text_input("Clave", type="password")
+        if st.button("Crear Cuenta"):
             try:
                 conn.execute("INSERT INTO profesores VALUES (?,?,?)", (nu.strip(), hash_password(np), nn.strip()))
                 conn.commit()
-                st.success("Registrado. Ya puedes ingresar.")
+                st.success("¡Cuenta creada!")
             except: st.error("El usuario ya existe")
     st.stop()
 
-# ====================== APP INICIADA ======================
+# ====================== APP PRINCIPAL ======================
 profesor = st.session_state.profesor_actual
-nombre_docente = st.session_state.nombre_docente
+st.sidebar.title(f"Hola, {st.session_state.nombre_docente}")
+menu = st.sidebar.radio("Menú", ["1. Mis Cursos", "2. Cargar Estudiantes", "3. Escanear QR", "4. Reportes", "5. Salir"])
 
-st.sidebar.title("Menú")
-st.sidebar.write(f"👤 {nombre_docente}")
-menu = st.sidebar.radio("Ir a:", ["Mis Cursos", "Cargar Alumnos/QR", "Escanear Asistencia", "Reportes", "Cerrar Sesión"])
-
-if menu == "Cerrar Sesión":
+if menu == "5. Salir":
     st.session_state.profesor_actual = None
     st.rerun()
 
 # 1. MIS CURSOS
-if menu == "Mis Cursos":
+if menu == "1. Mis Cursos":
     st.header("📚 Mis Cursos")
-    df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
-    st.table(df_cursos)
+    df_cursos = pd.read_sql("SELECT grado AS 'GRADO', materia AS 'MATERIA' FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
+    st.dataframe(df_cursos, use_container_width=True)
     
-    st.subheader("➕ Agregar Curso")
-    c1, c2 = st.columns(2)
-    ng = c1.text_input("Grado (ej: 11-02)")
-    nm = c2.text_input("Materia")
-    if st.button("Guardar"):
-        if ng and nm:
-            conn.execute("INSERT INTO docentes_cursos VALUES (?,?,?)", (profesor, ng.upper(), nm))
-            conn.commit()
-            st.rerun()
+    with st.expander("➕ Agregar Nuevo Curso"):
+        ng = st.text_input("Grado")
+        nm = st.text_input("Materia")
+        if st.button("Guardar Curso"):
+            if ng and nm:
+                conn.execute("INSERT INTO docentes_cursos VALUES (?,?,?)", (profesor, ng.upper(), nm))
+                conn.commit()
+                st.rerun()
 
-# 2. CARGAR ALUMNOS (Optimizado para móvil)
-elif menu == "Cargar Alumnos/QR":
-    st.header("👥 Gestión de Alumnos")
+# 2. CARGAR ESTUDIANTES (VERSIÓN ROBUSTA)
+elif menu == "2. Cargar Estudiantes":
+    st.header("👥 Carga de Alumnos")
     df_c = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
-    if df_c.empty: st.warning("Crea un curso primero")
+    if df_c.empty: st.warning("Primero crea un curso en el Menú 1")
     else:
-        sel = st.selectbox("Curso:", [f"{r.grado} - {r.materia}" for _, r in df_c.iterrows()])
+        sel = st.selectbox("Seleccione Curso:", [f"{r.grado} - {r.materia}" for _, r in df_c.iterrows()])
         grado, materia = [x.strip() for x in sel.split("-")]
         
-        # Tip para móviles
-        st.info("📱 Si usas celular: selecciona el archivo y espera a que la barra de carga termine antes de tocar Guardar.")
+        st.info("📱 Si el Excel falla en el celular, usa un archivo CSV.")
+        archivo = st.file_uploader("Archivo (estudiante_id, nombre, whatsapp)", type=["xlsx", "csv"])
         
-        archivo = st.file_uploader("Subir Excel (.xlsx)", type=["xlsx"])
         if archivo:
-            if st.button("💾 Guardar en Base de Datos"):
+            if st.button("💾 GUARDAR LISTA"):
                 try:
-                    df = pd.read_excel(archivo)
-                    df.columns = [c.lower().strip() for c in df.columns]
+                    if archivo.name.endswith('.csv'):
+                        df = pd.read_csv(archivo)
+                    else:
+                        df = pd.read_excel(archivo, engine='openpyxl')
+                    
+                    df.columns = [str(c).lower().strip() for c in df.columns]
+                    
                     for _, r in df.iterrows():
-                        ws = str(r['whatsapp']).split('.')[0] if 'whatsapp' in r else ""
-                        conn.execute("INSERT OR REPLACE INTO estudiantes VALUES (?,?,?,?,?,?)", 
-                                    (profesor, grado, materia, str(r['estudiante_id']), str(r['nombre']), ws))
+                        eid = str(r['estudiante_id']).split('.')[0]
+                        nom = str(r['nombre']).strip()
+                        ws = str(r.get('whatsapp', '')).split('.')[0] if 'whatsapp' in df.columns else ""
+                        conn.execute("INSERT OR REPLACE INTO estudiantes VALUES (?,?,?,?,?,?)", (profesor, grado, materia, eid, nom, ws))
                     conn.commit()
-                    st.success("Lista cargada correctamente")
+                    st.success(f"✅ Cargados {len(df)} estudiantes correctamente.")
                 except Exception as e:
-                    st.error(f"Error: {e}")
-        
+                    st.error(f"Error al leer archivo: {e}")
+
         st.markdown("---")
-        if st.button("📄 Generar PDF de QRs"):
+        if st.button("📄 GENERAR PDF DE CÓDIGOS QR"):
             alumnos = pd.read_sql("SELECT estudiante_id, nombre FROM estudiantes WHERE profesor=? AND grado=? AND materia=? ORDER BY nombre", conn, params=(profesor, grado, materia))
             if not alumnos.empty:
                 buf = BytesIO(); c = canvas.Canvas(buf, pagesize=A4)
                 x, y = 50, 750
                 for _, alu in alumnos.iterrows():
-                    qr = generar_qr(str(alu['estudiante_id']))
-                    c.drawImage(ImageReader(qr), x, y-100, width=100, height=100)
+                    qr_img = generar_qr(str(alu['estudiante_id']))
+                    c.drawImage(ImageReader(qr_img), x, y-100, width=100, height=100)
                     c.setFont("Helvetica-Bold", 8); c.drawCentredString(x+50, y-112, abreviar_nombre(alu['nombre']))
                     c.setFont("Helvetica", 7); c.drawCentredString(x+50, y-122, f"{grado} - {materia}")
                     x += 185
@@ -164,15 +148,15 @@ elif menu == "Cargar Alumnos/QR":
                     if y < 150: c.showPage(); y = 750
                 c.save(); st.download_button("⬇️ Descargar PDF", buf.getvalue(), f"QR_{grado}.pdf")
 
-# 3. ESCANEAR QR (Con botón Proceso Finalizado)
-elif menu == "Escanear Asistencia":
-    st.header("📸 Escáner")
+# 3. ESCANEAR (CÁMARA + PROCESO FINALIZADO)
+elif menu == "3. Escanear QR":
+    st.header("📸 Escáner de Asistencia")
     df_c = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
     if not df_c.empty:
-        sel = st.selectbox("Clase:", [f"{r.grado} - {r.materia}" for _, r in df_c.iterrows()])
+        sel = st.selectbox("Curso actual:", [f"{r.grado} - {r.materia}" for _, r in df_c.iterrows()])
         g, m = [x.strip() for x in sel.split("-")]
         
-        foto = st.camera_input("Escanear QR")
+        foto = st.camera_input("Enfoque el QR del estudiante")
         if foto:
             decoded = decode(np.array(Image.open(foto)))
             if decoded:
@@ -182,39 +166,43 @@ elif menu == "Escanear Asistencia":
                     f, h = datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%H:%M:%S")
                     try:
                         conn.execute("INSERT INTO asistencias VALUES (?,?,?,?,?,?)", (profesor, g, m, eid, f, h)); conn.commit()
-                        st.success(f"✅ REGISTRADO: {alu[0]}")
+                        st.success(f"✅ {alu[0]} REGISTRADO")
                     except: st.warning("Ya tiene asistencia hoy")
+                else: st.error("Estudiante no registrado en este curso")
         
         st.markdown("---")
         if st.button("🏁 PROCESO FINALIZADO", type="primary", use_container_width=True):
             hoy = datetime.now().strftime("%Y-%m-%d")
             total = pd.read_sql("SELECT estudiante_id, nombre, whatsapp FROM estudiantes WHERE profesor=? AND grado=? AND materia=?", conn, params=(profesor, g, m))
-            presentes = pd.read_sql("SELECT estudiante_id FROM asistencias WHERE profesor=? AND grado=? AND materia=? AND fecha=?", conn, params=(profesor, g, m, hoy))
-            ausentes = total[~total['estudiante_id'].isin(presentes['estudiante_id'])]
+            asistieron = pd.read_sql("SELECT estudiante_id FROM asistencias WHERE profesor=? AND grado=? AND materia=? AND fecha=?", conn, params=(profesor, g, m, hoy))
+            ausentes = total[~total['estudiante_id'].isin(asistieron['estudiante_id'])]
             
             if ausentes.empty: st.balloons(); st.success("¡Asistencia perfecta!")
             else:
-                st.subheader(f"⚠️ Ausentes ({len(ausentes)})")
+                st.subheader(f"⚠️ Estudiantes Ausentes ({len(ausentes)})")
                 for _, row in ausentes.iterrows():
                     nombre, tel = row['nombre'], str(row['whatsapp']).strip()
                     if tel and tel != "nan" and tel != "":
-                        msg = f"Notificación: Estudiante {nombre} NO asistió a la clase de {m} el día {hoy}."
-                        link = f"https://wa.me/{tel}?text={urllib.parse.quote(msg)}"
-                        st.markdown(f"❌ {nombre} - [📲 Notificar]({link})")
-                    else: st.write(f"❌ {nombre} (Sin WhatsApp)")
+                        mensaje = f"Notificación: El estudiante {nombre} no asistió hoy {hoy} a la clase de {m}."
+                        link = f"https://wa.me/{tel}?text={urllib.parse.quote(mensaje)}"
+                        st.markdown(f"❌ {nombre} - [📲 Enviar WhatsApp]({link})")
+                    else: st.write(f"❌ {nombre} (Sin número)")
 
 # 4. REPORTES
-elif menu == "Reportes":
+elif menu == "4. Reportes":
     st.header("📊 Reportes")
     df_c = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
     if not df_c.empty:
         sel = st.selectbox("Curso:", [f"{r.grado} - {r.materia}" for _, r in df_c.iterrows()])
         g, m = [x.strip() for x in sel.split("-")]
-        data = pd.read_sql("SELECT e.nombre, a.fecha FROM asistencias a JOIN estudiantes e ON a.estudiante_id = e.estudiante_id AND a.profesor=e.profesor AND a.grado=e.grado AND a.materia=e.materia WHERE a.profesor=? AND a.grado=? AND a.materia=?", conn, params=(profesor, g, m))
+        data = pd.read_sql("""SELECT e.nombre, a.fecha FROM asistencias a 
+                              JOIN estudiantes e ON a.estudiante_id = e.estudiante_id AND a.profesor=e.profesor AND a.grado=e.grado AND a.materia=e.materia 
+                              WHERE a.profesor=? AND a.grado=? AND a.materia=?""", conn, params=(profesor, g, m))
         if not data.empty:
-            df_p = data.pivot_table(index='nombre', columns='fecha', aggfunc='size', fill_value=0).replace({1: "P", 0: "A"})
-            st.dataframe(df_p)
-        else: st.info("Sin datos")
+            pivot = data.pivot_table(index='nombre', columns='fecha', aggfunc='size', fill_value=0).replace({1: "P", 0: "A"})
+            st.dataframe(pivot, use_container_width=True)
+            out = BytesIO(); pivot.to_excel(out); st.download_button("📥 Descargar Excel", out.getvalue(), f"Reporte_{g}.xlsx")
+        else: st.info("No hay registros de asistencia.")
 
 st.sidebar.markdown("---")
-st.sidebar.caption(f"{COLEGIO} - {CREADOR}")
+st.sidebar.caption(f"{COLEGIO} • v3.0")
