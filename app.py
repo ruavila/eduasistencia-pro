@@ -9,8 +9,6 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 import hashlib
-import numpy as np
-from pyzbar.pyzbar import decode
 
 # ====================== CONFIGURACIÓN ======================
 APP_NAME = "EduAsistencia Pro"
@@ -121,7 +119,7 @@ menu = st.sidebar.selectbox("Menú principal:", [
     "5. Reiniciar mis datos"
 ])
 
-# 1. MIS CURSOS - Corregido para eliminación efectiva
+# 1. MIS CURSOS - Eliminación ultra robusta
 if menu == "1. Mis Cursos (Agregar / Eliminar)":
     st.header("📚 Mis Cursos")
     df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=? ORDER BY grado, materia", conn, params=(profesor,))
@@ -134,18 +132,16 @@ if menu == "1. Mis Cursos (Agregar / Eliminar)":
         curso_elim = st.selectbox("Selecciona el curso a eliminar", 
                                   [f"{r.grado} - {r.materia}" for _, r in df_cursos.iterrows()], 
                                   key="curso_eliminar_key")
-        
-        # Cambio de lógica: Checkbox primero para habilitar el botón
-        confirmar = st.checkbox(f"Confirmo que deseo eliminar el curso **{curso_elim}** y todos sus datos asociados.")
-        
-        if st.button("🗑️ Eliminar curso seleccionado", type="secondary", disabled=not confirmar):
-            g, m = [x.strip() for x in curso_elim.split(" - ")]
-            conn.execute("DELETE FROM docentes_cursos WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
-            conn.execute("DELETE FROM estudiantes WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
-            conn.execute("DELETE FROM asistencias WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
-            conn.commit()
-            st.success(f"✅ Curso **{g} - {m}** eliminado correctamente")
-            st.rerun()
+
+        if st.button("🗑️ Eliminar curso seleccionado", type="secondary"):
+            if st.checkbox("Confirmo que deseo eliminar este curso y todos sus estudiantes"):
+                g, m = [x.strip() for x in curso_elim.split(" - ")]
+                conn.execute("DELETE FROM docentes_cursos WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
+                conn.execute("DELETE FROM estudiantes WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
+                conn.execute("DELETE FROM asistencias WHERE profesor=? AND grado=? AND materia=?", (profesor, g, m))
+                conn.commit()
+                st.success(f"✅ Operación exitosa. Curso **{g} - {m}** eliminado correctamente")
+                st.rerun()
     else:
         st.info("Aún no tienes cursos registrados.")
 
@@ -164,7 +160,7 @@ if menu == "1. Mis Cursos (Agregar / Eliminar)":
             except:
                 st.warning("Este curso ya existe para ti")
 
-# 2. GESTIONAR ESTUDIANTES Y GENERAR PDF
+# 2. GESTIONAR ESTUDIANTES Y GENERAR PDF - Optimizado para Celular
 elif menu == "2. Gestionar Estudiantes y Generar PDF":
     st.header("👥 Gestionar Estudiantes y Generar PDF")
     df_cursos = pd.read_sql("SELECT grado, materia FROM docentes_cursos WHERE profesor=?", conn, params=(profesor,))
@@ -209,7 +205,7 @@ elif menu == "2. Gestionar Estudiantes y Generar PDF":
                         for _, row in df.iterrows():
                             try:
                                 conn.execute("INSERT INTO estudiantes VALUES (?,?,?,?,?)", 
-                                            (row["profesor"], row["grado"], row["materia"], str(row["estudiante_id"]), row["nombre"]))
+                                            (row["profesor"], row["grado"], row["materia"], row["estudiante_id"], row["nombre"]))
                                 conn.commit()
                                 agregados += 1
                             except:
@@ -218,6 +214,7 @@ elif menu == "2. Gestionar Estudiantes y Generar PDF":
                         st.rerun()
             except Exception as e:
                 st.error(f"Error al leer el archivo: {str(e)}")
+                st.info("Intenta guardar el archivo como .xlsx desde Excel y subirlo de nuevo.")
 
         if st.button("📄 Generar PDF con QR (4x4 cm)", type="primary"):
             df_para_pdf = pd.read_sql(
@@ -231,7 +228,7 @@ elif menu == "2. Gestionar Estudiantes y Generar PDF":
                     pdf_buffer = BytesIO()
                     c = canvas.Canvas(pdf_buffer, pagesize=A4)
                     width, height = A4
-                    qr_size = 113.3858 # 4cm
+                    qr_size = 113.3858
                     margin_x = 45
                     margin_y = 70
                     spacing_x = 25
@@ -246,7 +243,7 @@ elif menu == "2. Gestionar Estudiantes y Generar PDF":
                         x = margin_x + col * (qr_size + spacing_x)
                         y = height - margin_y - row_num * (qr_size + spacing_y)
 
-                        qr_img = generar_qr(str(row["estudiante_id"]))
+                        qr_img = generar_qr(row["estudiante_id"])
                         qr_pil = Image.open(qr_img)
                         qr_path = BytesIO()
                         qr_pil.save(qr_path, format="PNG")
@@ -290,24 +287,27 @@ elif menu == "3. Escanear Asistencia con Cámara":
                 info = pd.read_sql("SELECT nombre FROM estudiantes WHERE profesor=? AND estudiante_id=? AND grado=? AND materia=?", 
                                    conn, params=(profesor, est_id, grado, materia))
                 if info.empty:
-                    st.error("🚫 El estudiante no pertenece al grado/materia")
+                    st.error("🚫 El estudiante no pertenece al grado")
                 else:
                     nombre = info.iloc[0]["nombre"]
                     fecha = datetime.now().strftime("%Y-%m-%d")
                     hora = datetime.now().strftime("%H:%M:%S")
-                    
-                    try:
-                        conn.execute("INSERT INTO asistencias VALUES (?,?,?,?,?,?)", 
-                                    (profesor, grado, materia, est_id, fecha, hora))
-                        conn.commit()
-                        st.balloons()
-                        st.success(f"✅ Asistencia registrada para {nombre}")
-                    except:
-                        st.warning("Este estudiante ya tiene asistencia hoy")
+                    key = f"{profesor}_{grado}_{materia}_{est_id}_{fecha}"
+                    if key not in st.session_state:
+                        try:
+                            conn.execute("INSERT INTO asistencias VALUES (?,?,?,?,?,?)", 
+                                        (profesor, grado, materia, est_id, fecha, hora))
+                            conn.commit()
+                            st.session_state[key] = True
+                            st.balloons()
+                            st.success(f"✅ Asistencia registrada para {nombre}")
+                        except:
+                            st.warning("Este estudiante ya tiene asistencia hoy")
             else:
                 st.error("No se pudo leer el código QR")
 
             if st.button("✅ Listo - Escanear siguiente"):
+                st.session_state.cam_key = None
                 st.rerun()
 
 # 4. REPORTE
@@ -324,7 +324,7 @@ elif menu == "4. Reporte y Descargar Excel":
         data = pd.read_sql("""
             SELECT e.nombre, a.fecha 
             FROM asistencias a
-            JOIN estudiantes e ON a.estudiante_id = e.estudiante_id AND a.profesor = e.profesor AND a.grado = e.grado AND a.materia = e.materia
+            JOIN estudiantes e ON a.estudiante_id = e.estudiante_id
             WHERE a.profesor=? AND a.grado = ? AND a.materia = ?
         """, conn, params=(profesor, grado, materia))
 
@@ -338,14 +338,16 @@ elif menu == "4. Reporte y Descargar Excel":
 
             tabla['Total Presente'] = (tabla == "Presente").sum(axis=1)
             tabla['Total Ausente'] = len(fechas) - tabla['Total Presente']
-            tabla['% Asistencia'] = ((tabla['Total Presente'] / len(fechas)) * 100).round(1)
+            tabla['% Asistencia'] = ((tabla['Total Presente'] / len(fechas)) * 100).round(1) if len(fechas) > 0 else 0
 
             tabla = tabla.reset_index().rename(columns={'index': 'Estudiante'})
             st.dataframe(tabla, use_container_width=True)
 
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                tabla.to_excel(writer, index=False)
+                pd.DataFrame([[f"ASISTENCIA - {materia} - GRADO {grado}"]]).to_excel(writer, startrow=0, header=False, index=False)
+                pd.DataFrame([[f"Docente: {nombre_docente}"]]).to_excel(writer, startrow=1, header=False, index=False)
+                tabla.to_excel(writer, startrow=3, index=False)
             output.seek(0)
             st.download_button("📥 Descargar Excel", output, f"Asistencia_{grado}_{materia}.xlsx")
 
@@ -353,14 +355,13 @@ elif menu == "4. Reporte y Descargar Excel":
 elif menu == "5. Reiniciar mis datos":
     st.header("⚠️ Reiniciar mis datos")
     st.warning("Esta acción borrará todos tus cursos, estudiantes y asistencias.")
-    confirmar_todo = st.checkbox("Entiendo y deseo borrar TODOS mis datos registrados.")
-    if st.button("🔄 Confirmar Reinicio Total", type="secondary", disabled=not confirmar_todo):
-        conn.execute("DELETE FROM docentes_cursos WHERE profesor=?", (profesor,))
-        conn.execute("DELETE FROM estudiantes WHERE profesor=?", (profesor,))
-        conn.execute("DELETE FROM asistencias WHERE profesor=?", (profesor,))
-        conn.commit()
-        st.success("✅ Operación exitosa. Tus datos han sido reiniciados.")
-        st.rerun()
+    if st.checkbox("Entiendo y deseo reiniciar mis datos"):
+        if st.button("🔄 Confirmar Reinicio", type="secondary"):
+            conn.execute("DELETE FROM docentes_cursos WHERE profesor=?", (profesor,))
+            conn.execute("DELETE FROM estudiantes WHERE profesor=?", (profesor,))
+            conn.execute("DELETE FROM asistencias WHERE profesor=?", (profesor,))
+            conn.commit()
+            st.success("✅ Operación exitosa. Tus datos han sido reiniciados.")
+            st.rerun()
 
-st.sidebar.markdown("---")
-st.sidebar.caption(f"{APP_NAME} • {COLEGIO} • Desarrollado por {CREADOR}")
+st.caption(f"{APP_NAME} • {COLEGIO} • Desarrollado por {CREADOR}")
